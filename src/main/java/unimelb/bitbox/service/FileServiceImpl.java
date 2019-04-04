@@ -42,7 +42,7 @@ public class FileServiceImpl implements FileService {
         } else if (fileSystemEvent.event == EVENT.DIRECTORY_DELETE) {
             request.append("command", DIRECTORY_DELETE_REQUEST);
             request.append("pathName", fileSystemEvent.pathName);
-        } else if (fileSystemEvent.event == EVENT.FILE_MODIFY){
+        } else if (fileSystemEvent.event == EVENT.FILE_MODIFY) {
             request.append("command", FILE_MODIFY_REQUEST);
             request.append("fileDescriptor", fileSystemEvent.fileDescriptor.toDoc());
             request.append("pathName", fileSystemEvent.pathName);
@@ -69,7 +69,7 @@ public class FileServiceImpl implements FileService {
                                 fileDescriptor.getLong("fileSize"), fileDescriptor.getLong("lastModified"))) {
                             //request byte and write
                             if (!fileSystemManager.checkShortcut(pathName)) {
-                                getByte(socket, request, fileSystemManager, 0);
+                                getByte(socket, request, 0);
                             } else {
                                 fileSystemManager.writeFile(pathName,
                                         fileSystemManager.readFile(fileDescriptor.getString("md5"), 0, fileDescriptor.getLong("fileSize")), 0);
@@ -91,10 +91,10 @@ public class FileServiceImpl implements FileService {
                     pathName = request.getString("pathName");
                     response.append("fileDescriptor", fileDescriptor);
                     response.append("pathName", pathName);
-                    if (fileSystemManager.fileNameExists(pathName)){
-                        if(fileSystemManager.modifyFileLoader(pathName, fileDescriptor.getString("md5"),fileDescriptor.getLong("lastModified"))){
+                    if (fileSystemManager.fileNameExists(pathName)) {
+                        if (fileSystemManager.modifyFileLoader(pathName, fileDescriptor.getString("md5"), fileDescriptor.getLong("lastModified"))) {
                             if (!fileSystemManager.checkShortcut(pathName)) {
-                                getByte(socket, request, fileSystemManager, 0);
+                                getByte(socket, request, 0);
                             } else {
                                 fileSystemManager.writeFile(pathName,
                                         fileSystemManager.readFile(fileDescriptor.getString("md5"), 0, fileDescriptor.getLong("fileSize")), 0);
@@ -133,10 +133,10 @@ public class FileServiceImpl implements FileService {
                 case FILE_DELETE_REQUEST:
                     fileDescriptor = (Document) request.get("fileDescriptor");
                     pathName = request.getString("pathName");
-                    response.append("command", FILE_BYTES_RESPONSE);
+                    response.append("command", FILE_DELETE_RESPONSE);
                     response.append("fileDescriptor", fileDescriptor);
                     response.append("pathName", pathName);
-                    if (fileSystemManager.fileNameExists(pathName, fileDescriptor.getString("md5"))) {
+                    if (fileSystemManager.isSafePathName(pathName) && fileSystemManager.fileNameExists(pathName, fileDescriptor.getString("md5"))) {
                         if (fileSystemManager.deleteFile(pathName, fileDescriptor.getLong("lastModified"), fileDescriptor.getString("md5"))) {
                             log.info("delete file:" + pathName);
                             response.append("message", "successful delete");
@@ -152,12 +152,16 @@ public class FileServiceImpl implements FileService {
                     break;
                 case DIRECTORY_CREATE_REQUEST:
                     pathName = request.getString("pathName");
-                    response.append("command", FILE_BYTES_RESPONSE);
+                    response.append("command", DIRECTORY_CREATE_RESPONSE);
                     response.append("pathName", pathName);
-                    if (!fileSystemManager.dirNameExists(pathName)) {
-                        fileSystemManager.makeDirectory(pathName);
-                        response.append("message", "successful create");
-                        response.append("status", true);
+                    if (fileSystemManager.isSafePathName(pathName) && !fileSystemManager.dirNameExists(pathName)) {
+                        if (fileSystemManager.makeDirectory(pathName)) {
+                            response.append("message", "successful create");
+                            response.append("status", true);
+                        } else {
+                            response.append("message", "failed create");
+                            response.append("status", false);
+                        }
                     } else {
                         response.append("message", "pathname already exists");
                         response.append("status", false);
@@ -165,27 +169,34 @@ public class FileServiceImpl implements FileService {
                     break;
                 case DIRECTORY_DELETE_REQUEST:
                     pathName = request.getString("pathName");
-                    if(fileSystemManager.dirNameExists(pathName)){
-                        fileSystemManager.deleteDirectory(pathName);
-                        response.append("message", "directory deleted");
-                        response.append("status", true);
+                    response.append("command", DIRECTORY_DELETE_RESPONSE);
+                    if (fileSystemManager.isSafePathName(pathName) && fileSystemManager.dirNameExists(pathName)) {
+                        if (fileSystemManager.deleteDirectory(pathName)) {
+                            response.append("message", "success delete directory");
+                            response.append("status", true);
+                        } else {
+                            response.append("message", "fail delete directory");
+                            response.append("status", false);
+                        }
                     } else {
                         response.append("message", "there are no such directory");
                         response.append("status", false);
                     }
                     break;
                 case FILE_BYTES_RESPONSE:
-                    pathName = request.getString("pathName");
                     position = request.getLong("position");
-                    length = request.getLong("length");
                     if (!request.getBoolean("status")) {
                         log.warning("byte request fail");
+                        //try again
+                        getByte(socket, request, position);
                     } else {
+                        pathName = request.getString("pathName");
+                        length = request.getLong("length");
                         //write into file
                         fileSystemManager.writeFile(pathName, deCoder.decode(ByteBuffer.wrap(request.getString("content").getBytes())),
                                 request.getLong("position"));
                         if (!fileSystemManager.checkWriteComplete(pathName)) {
-                            getByte(socket, request, fileSystemManager, position + length);
+                            getByte(socket, request, position + length);
                         }
                     }
                 case DIRECTORY_CREATE_RESPONSE:
@@ -218,7 +229,7 @@ public class FileServiceImpl implements FileService {
         return response;
     }
 
-    private void getByte(Socket socket, Document request, FileSystemManager fileSystemManager, long position) throws Exception {
+    private void getByte(Socket socket, Document request, long position) throws Exception {
         Document fileDescriptor = (Document) request.get("fileDescriptor");
         String pathName = request.getString("pathName");
         Document byteRequest = generateByteRequest(fileDescriptor, pathName, position);
