@@ -1,5 +1,8 @@
 package unimelb.bitbox.util;
 
+import java.util.Arrays;
+import java.util.List;
+
 /**
  * Created by xiyang on 2019/3/26
  */
@@ -20,4 +23,8 @@ public interface RequestUtil {
     public final static String DIRECTORY_CREATE_RESPONSE = "DIRECTORY_CREATE_RESPONSE";
     public final static String DIRECTORY_DELETE_REQUEST = "DIRECTORY_DELETE_REQUEST";
     public final static String DIRECTORY_DELETE_RESPONSE = "DIRECTORY_DELETE_RESPONSE";
+
+    public final static List<String> REQUEST_LIST = Arrays.asList(FILE_CREATE_REQUEST, FILE_DELETE_REQUEST,
+            FILE_MODIFY_REQUEST, DIRECTORY_CREATE_REQUEST, DIRECTORY_DELETE_REQUEST);
+
 }

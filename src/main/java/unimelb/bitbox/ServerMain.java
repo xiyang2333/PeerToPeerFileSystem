@@ -1,7 +1,6 @@
 package unimelb.bitbox;
 
-import java.io.DataInputStream;
-import java.io.IOException;
+import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.security.NoSuchAlgorithmException;
@@ -17,7 +16,7 @@ import static unimelb.bitbox.util.RequestUtil.*;
 public class ServerMain implements FileSystemObserver {
     private static Logger log = Logger.getLogger(ServerMain.class.getName());
 
-    private List<Socket> socketPool = new Vector<>();
+    public static List<Socket> socketPool = new Vector<>();
     private int socketCount = 0;
 
     private SocketService socketService = new SocketServiceImpl();
@@ -66,7 +65,7 @@ public class ServerMain implements FileSystemObserver {
                                 dealWithSync(socket, fileSystemManager.generateSyncEvents());
                                 socketPool.add(socket);
                                 socketCount++;
-                                new SocketReceiveDealThread(fileSystemManager, socket).run();
+                                new SocketReceiveDealThread(fileSystemManager, socket, null).run();
                             }
                             socketPool.removeIf(Objects::isNull);
                         }
@@ -122,9 +121,8 @@ public class ServerMain implements FileSystemObserver {
 
     private boolean connectToPeer(HostPort hostPort, HostPort local, FileSystemManager manager) {
         boolean result = true;
-        Socket socket = null;
         try {
-            socket = new Socket(hostPort.host, hostPort.port);
+            Socket socket = new Socket(hostPort.host, hostPort.port);
 
             //generate request
             Document handshakeRequest = new Document();
@@ -134,8 +132,9 @@ public class ServerMain implements FileSystemObserver {
             String requestJson = handshakeRequest.toJson();
             socketService.send(socket, requestJson);
             // read a line of data from the stream
-            DataInputStream in = new DataInputStream(socket.getInputStream());
-            String data = in.readUTF();
+            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(),"UTF8"));
+            String data = in.readLine();
+            log.info(data);
             Document handshakeResponse = Document.parse(data);
             //if success, then put into socketPool
             if (HANDSHAKE_RESPONSE.equals(handshakeResponse.getString("command"))) {
@@ -143,7 +142,7 @@ public class ServerMain implements FileSystemObserver {
                 socketCount++;
                 //deal generalSync
                 dealWithSync(socket, fileSystemManager.generateSyncEvents());
-                new SocketReceiveDealThread(manager, socket).run();
+                new SocketReceiveDealThread(manager, socket, in).start();
             } else if (CONNECTION_REFUSED.equals(handshakeResponse.getString("command"))) {
                 socket.close();
                 result = false;
@@ -162,13 +161,13 @@ public class ServerMain implements FileSystemObserver {
             }
         } catch (Exception ex) {
             log.warning(ex.getMessage());
-            if (socket != null) {
-                try {
-                    socket.close();
-                } catch (IOException ioE) {
-                    log.warning("io problem: " + ioE.getMessage() + String.format("host: %s, port: %d", hostPort.host, hostPort.port));
-                }
-            }
+//            if (socket != null) {
+//                try {
+//                    socket.close();
+//                } catch (IOException ioE) {
+//                    log.warning("io problem: " + ioE.getMessage() + String.format("host: %s, port: %d", hostPort.host, hostPort.port));
+//                }
+//            }
         }
         return result;
     }
@@ -181,15 +180,6 @@ public class ServerMain implements FileSystemObserver {
                     log.info(requestJson);
                     //send
                     socketService.send(socket, requestJson);
-//                            DataInputStream in = new DataInputStream(socket.getInputStream());
-//                            //get response and log it
-//                            String data = in.readUTF();
-//                            log.info(data);
-//                            //if fail, close it
-//                            Document response = Document.parse(data);
-//                            if(INVALID_PROTOCOL.equals(response.getString("command"))){
-//                                socket.close();
-//                            }
                 } catch (Exception ex) {
                     log.warning(ex.getMessage());
                     socket.close();
