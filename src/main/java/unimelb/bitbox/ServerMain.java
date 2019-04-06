@@ -59,7 +59,7 @@ public class ServerMain implements FileSystemObserver {
                                 Document connectionRefused = new Document();
 
                                 connectionRefused.append("command", CONNECTION_REFUSED);
-                                connectionRefused.append("peers", portsDoc); //返回的port 数量和 实际数量
+                                connectionRefused.append("peers", portsDoc); 
                                 socketService.send(socket, connectionRefused.toJson());
                                 //close socket
                                 socket.close();
