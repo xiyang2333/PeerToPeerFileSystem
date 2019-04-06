@@ -74,7 +74,7 @@ public class ServerMain implements FileSystemObserver {
                                 dealWithSync(socket, fileSystemManager.generateSyncEvents());
                                 socketPool.add(socket);
                                 socketCount++;
-                                new SocketReceiveDealThread(fileSystemManager, socket, null).run();
+                                new SocketReceiveDealThread(fileSystemManager, socket, null).start();
                             }
                             socketPool.removeIf(Objects::isNull);
                         }
