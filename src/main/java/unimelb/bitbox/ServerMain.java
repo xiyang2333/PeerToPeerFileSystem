@@ -30,14 +30,21 @@ public class ServerMain implements FileSystemObserver {
 
         //connect to other peers
         try {
+
             String[] peers = configuration.get("peers").split(",");
             ArrayList<HostPort> hostPorts = new ArrayList<>();
+            ArrayList<Document> portsDoc = new ArrayList<>();
             HostPort local = new HostPort(configuration.get("advertisedName"), Integer.parseInt(configuration.get("port")));
             for (String peer : peers) {
                 HostPort hostPort = new HostPort(peer);
                 hostPorts.add(hostPort);
+                portsDoc.add(hostPort.toDoc());
                 connectToPeer(hostPort, local, fileSystemManager);
             }
+
+
+
+
 
             //start Server
             new Thread(new Runnable() {
@@ -48,13 +55,15 @@ public class ServerMain implements FileSystemObserver {
                         while (true) {
                             Socket socket = serverSocket.accept();
                             //if there are too many socket, return connect refuse
-                            if (socketCount > Integer.parseInt(configuration.get("maximumIncommingConnections"))) {
+                            if (socketCount >= Integer.parseInt(configuration.get("maximumIncommingConnections"))) {
                                 Document connectionRefused = new Document();
+
                                 connectionRefused.append("command", CONNECTION_REFUSED);
-                                connectionRefused.append("peers", hostPorts);
+                                connectionRefused.append("peers", portsDoc); 
                                 socketService.send(socket, connectionRefused.toJson());
                                 //close socket
                                 socket.close();
+
                             } else {
                                 //if success, return response and add to socket pool
                                 Document handshakeResponse = new Document();
@@ -65,7 +74,7 @@ public class ServerMain implements FileSystemObserver {
                                 dealWithSync(socket, fileSystemManager.generateSyncEvents());
                                 socketPool.add(socket);
                                 socketCount++;
-                                new SocketReceiveDealThread(fileSystemManager, socket, null).run();
+                                new SocketReceiveDealThread(fileSystemManager, socket, null).start();
                             }
                             socketPool.removeIf(Objects::isNull);
                         }
@@ -76,6 +85,7 @@ public class ServerMain implements FileSystemObserver {
                     }
                 }
             }).start();
+
 
             //start generateSync
             new Thread(new Runnable() {
@@ -96,10 +106,15 @@ public class ServerMain implements FileSystemObserver {
                     }
                 }
             }).start();
-        } catch (Exception ex) {
+        }catch (Exception ex) {
             log.warning(ex.getMessage());
         }
+
+
+
     }
+
+
 
     @Override
     public void processFileSystemEvent(FileSystemEvent fileSystemEvent) {
@@ -147,9 +162,10 @@ public class ServerMain implements FileSystemObserver {
                 socket.close();
                 result = false;
                 //close socket and try to connect another one
-                List<HostPort> hostPorts = (ArrayList<HostPort>) handshakeResponse.get("peers");
-                for (HostPort nextHost : hostPorts) {
-                    result = connectToPeer(nextHost, local, manager);
+                List<Document> portDoc = (ArrayList<Document>) handshakeResponse.get("peers");
+                for (Document nextHost : portDoc) {
+                    HostPort port = new HostPort(nextHost);
+                    result = connectToPeer(port, local, manager);
                     if (result) {
                         break;
                     }
