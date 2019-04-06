@@ -37,7 +37,7 @@ public class SocketReceiveDealThread extends Thread {
                 in = new BufferedReader(new InputStreamReader(socket.getInputStream(),"UTF8"));
             }
             BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream(), "UTF8"));
-            if (socket.isConnected()) {
+            while (socket.isConnected()) {
                 String data = in.readLine();
                 log.info(data);
                 Document response = fileService.OperateAndResponseGenerate(socket, Document.parse(data), fileSystemManager);
