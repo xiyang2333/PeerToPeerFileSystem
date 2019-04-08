@@ -17,6 +17,8 @@ public class ServerMain implements FileSystemObserver {
     private static Logger log = Logger.getLogger(ServerMain.class.getName());
 
     public static List<Socket> socketPool = new Vector<>();
+    public static ArrayList<Document> connectSocket = new ArrayList<>();
+    public static ArrayList<HostPort> refusedSocket = new ArrayList<>();
     private int socketCount = 0;
 
     private SocketService socketService = new SocketServiceImpl();
@@ -33,12 +35,12 @@ public class ServerMain implements FileSystemObserver {
 
             String[] peers = configuration.get("peers").split(",");
 //            ArrayList<HostPort> hostPorts = new ArrayList<>();
-            ArrayList<Document> portsDoc = new ArrayList<>();
+//            ArrayList<Document> portsDoc = new ArrayList<>();
             HostPort local = new HostPort(configuration.get("advertisedName"), Integer.parseInt(configuration.get("port")));
             for (String peer : peers) {
                 HostPort hostPort = new HostPort(peer);
 //                hostPorts.add(hostPort);
-                portsDoc.add(hostPort.toDoc());
+//                portsDoc.add(hostPort.toDoc());
                 //try connect to the other peer
                 new Thread(new Runnable() {
                     @Override
@@ -47,6 +49,7 @@ public class ServerMain implements FileSystemObserver {
                     }
                 }).start();
             }
+
             //start generateSync
             new Thread(new Runnable() {
                 @Override
@@ -87,7 +90,6 @@ public class ServerMain implements FileSystemObserver {
                                 //the first data should be hand shake request
                                 if (!HANDSHAKE_REQUEST.equals(document.getString("command"))) {
                                     Document invalid = new Document();
-
                                     invalid.append("command", INVALID_PROTOCOL);
                                     invalid.append("message", "wrong command");
                                     socketService.send(socket, invalid.toJson());
@@ -97,9 +99,8 @@ public class ServerMain implements FileSystemObserver {
                                 } else if (socketCount >= Integer.parseInt(configuration.get("maximumIncommingConnections"))) {
                                     //if there are too many socket, return connect refuse
                                     Document connectionRefused = new Document();
-
                                     connectionRefused.append("command", CONNECTION_REFUSED);
-                                    connectionRefused.append("peers", portsDoc);
+                                    connectionRefused.append("peers", connectSocket);
                                     socketService.send(socket, connectionRefused.toJson());
                                     //close socket
                                     socket.close();
@@ -112,6 +113,8 @@ public class ServerMain implements FileSystemObserver {
                                     socketService.send(socket, handshakeResponse.toJson());
                                     //deal generalSync
                                     dealWithSync(socket, fileSystemManager.generateSyncEvents());
+                                    Document newPort = (Document) document.get("hostPort");
+                                    connectSocket.add(newPort);
                                     socketPool.add(socket);
                                     socketCount++;
                                     new SocketReceiveDealThread(fileSystemManager, socket, null).start();
@@ -146,6 +149,7 @@ public class ServerMain implements FileSystemObserver {
                 int index = 0;
                 for (Socket socket : socketPool) {
                     newPostThread(socket, request, index);
+                    index++;
                 }
                 socketPool.removeIf(Objects::isNull);
             }
@@ -155,6 +159,10 @@ public class ServerMain implements FileSystemObserver {
     }
 
     private boolean connectToPeer(HostPort hostPort, HostPort local, FileSystemManager manager) {
+        // eliminate duplicate connections
+        if (connectSocket.contains(hostPort.toDoc())||refusedSocket.contains(hostPort)){
+            return false;
+        }
         boolean result = true;
         try {
             Socket socket = new Socket(hostPort.host, hostPort.port);
@@ -173,6 +181,8 @@ public class ServerMain implements FileSystemObserver {
             Document handshakeResponse = Document.parse(data);
             //if success, then put into socketPool
             if (HANDSHAKE_RESPONSE.equals(handshakeResponse.getString("command"))) {
+                Document newPort = (Document) handshakeResponse.get("hostPort");
+                connectSocket.add(newPort);
                 socketPool.add(socket);
                 socketCount++;
                 //deal generalSync
@@ -181,6 +191,7 @@ public class ServerMain implements FileSystemObserver {
             } else if (CONNECTION_REFUSED.equals(handshakeResponse.getString("command"))) {
                 socket.close();
                 result = false;
+                refusedSocket.add(hostPort);
                 //close socket and try to connect another one
                 List<Document> portDoc = (ArrayList<Document>) handshakeResponse.get("peers");
                 for (Document nextHost : portDoc) {
@@ -226,6 +237,7 @@ public class ServerMain implements FileSystemObserver {
                 socketCount--;
                 if (index != null) {
                     socketPool.set(index, null);
+                    connectSocket.set(index,null);
                 }
             }
         } catch (IOException e) {
