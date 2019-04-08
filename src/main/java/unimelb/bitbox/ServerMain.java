@@ -39,64 +39,14 @@ public class ServerMain implements FileSystemObserver {
                 HostPort hostPort = new HostPort(peer);
 //                hostPorts.add(hostPort);
                 portsDoc.add(hostPort.toDoc());
-                connectToPeer(hostPort, local, fileSystemManager);
-            }
-
-            //start Server
-            new Thread(new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        ServerSocket serverSocket = new ServerSocket(local.port);
-                        while (true) {
-                            Socket socket = serverSocket.accept();
-                            // read a line of data from the stream
-                            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(),"UTF8"));
-                            String data = in.readLine();
-                            log.info(data);
-                            Document document = Document.parse(data);
-                            //the first data should be hand shake request
-                            if (!HANDSHAKE_REQUEST.equals(document.getString("command"))){
-                                Document invalid = new Document();
-
-                                invalid.append("command", INVALID_PROTOCOL);
-                                invalid.append("message", "wrong command");
-                                socketService.send(socket, invalid.toJson());
-                                //close socket
-                                socket.close();
-
-                            } else if (socketCount >= Integer.parseInt(configuration.get("maximumIncommingConnections"))) {
-                                //if there are too many socket, return connect refuse
-                                Document connectionRefused = new Document();
-
-                                connectionRefused.append("command", CONNECTION_REFUSED);
-                                connectionRefused.append("peers", portsDoc); 
-                                socketService.send(socket, connectionRefused.toJson());
-                                //close socket
-                                socket.close();
-
-                            } else {
-                                //if success, return response and add to socket pool
-                                Document handshakeResponse = new Document();
-                                handshakeResponse.append("command", HANDSHAKE_RESPONSE);
-                                handshakeResponse.append("hostPort", new HostPort(local.host, local.port).toDoc());
-                                socketService.send(socket, handshakeResponse.toJson());
-                                //deal generalSync
-                                dealWithSync(socket, fileSystemManager.generateSyncEvents());
-                                socketPool.add(socket);
-                                socketCount++;
-                                new SocketReceiveDealThread(fileSystemManager, socket, null).start();
-                            }
-                            socketPool.removeIf(Objects::isNull);
-                        }
-                    } catch (IOException e) {
-                        log.warning(e.getMessage());
-                    } catch (Exception ex) {
-                        log.warning(ex.getMessage());
+                //try connect to the other peer
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        connectToPeer(hostPort, local, fileSystemManager);
                     }
-                }
-            }).start();
-
+                }).start();
+            }
             //start generateSync
             new Thread(new Runnable() {
                 @Override
@@ -116,7 +66,71 @@ public class ServerMain implements FileSystemObserver {
                     }
                 }
             }).start();
-        }catch (Exception ex) {
+
+            //start Server
+//            new Thread(new Runnable() {
+//                @Override
+//                public void run() {
+            try {
+                ServerSocket serverSocket = new ServerSocket(local.port);
+                while (true) {
+                    Socket socket = serverSocket.accept();
+                    new Thread(new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                // read a line of data from the stream
+                                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF8"));
+                                String data = in.readLine();
+                                log.info(data);
+                                Document document = Document.parse(data);
+                                //the first data should be hand shake request
+                                if (!HANDSHAKE_REQUEST.equals(document.getString("command"))) {
+                                    Document invalid = new Document();
+
+                                    invalid.append("command", INVALID_PROTOCOL);
+                                    invalid.append("message", "wrong command");
+                                    socketService.send(socket, invalid.toJson());
+                                    //close socket
+                                    socket.close();
+
+                                } else if (socketCount >= Integer.parseInt(configuration.get("maximumIncommingConnections"))) {
+                                    //if there are too many socket, return connect refuse
+                                    Document connectionRefused = new Document();
+
+                                    connectionRefused.append("command", CONNECTION_REFUSED);
+                                    connectionRefused.append("peers", portsDoc);
+                                    socketService.send(socket, connectionRefused.toJson());
+                                    //close socket
+                                    socket.close();
+
+                                } else {
+                                    //if success, return response and add to socket pool
+                                    Document handshakeResponse = new Document();
+                                    handshakeResponse.append("command", HANDSHAKE_RESPONSE);
+                                    handshakeResponse.append("hostPort", new HostPort(local.host, local.port).toDoc());
+                                    socketService.send(socket, handshakeResponse.toJson());
+                                    //deal generalSync
+                                    dealWithSync(socket, fileSystemManager.generateSyncEvents());
+                                    socketPool.add(socket);
+                                    socketCount++;
+                                    new SocketReceiveDealThread(fileSystemManager, socket, null).start();
+                                }
+                            } catch (Exception ex) {
+
+                            }
+                        }
+                    }).start();
+                    socketPool.removeIf(Objects::isNull);
+                }
+            } catch (IOException e) {
+                log.warning(e.getMessage());
+            } catch (Exception ex) {
+                log.warning(ex.getMessage());
+            }
+//                }
+//            }).start();
+        } catch (Exception ex) {
             log.warning(ex.getMessage());
         }
 
@@ -128,7 +142,7 @@ public class ServerMain implements FileSystemObserver {
         // TODO: process events03
         try {
             Document request = fileService.requestGenerate(fileSystemEvent);
-            if(request != null) {
+            if (request != null) {
                 int index = 0;
                 for (Socket socket : socketPool) {
                     newPostThread(socket, request, index);
@@ -153,7 +167,7 @@ public class ServerMain implements FileSystemObserver {
             String requestJson = handshakeRequest.toJson();
             socketService.send(socket, requestJson);
             // read a line of data from the stream
-            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(),"UTF8"));
+            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF8"));
             String data = in.readLine();
             log.info(data);
             Document handshakeResponse = Document.parse(data);
@@ -210,7 +224,7 @@ public class ServerMain implements FileSystemObserver {
             if (socket != null && socket.isClosed()) {
                 //if disconnect set it to null
                 socketCount--;
-                if(index != null){
+                if (index != null) {
                     socketPool.set(index, null);
                 }
             }
@@ -222,7 +236,7 @@ public class ServerMain implements FileSystemObserver {
     public void dealWithSync(Socket socket, List<FileSystemEvent> events) {
         for (FileSystemEvent event : events) {
             Document request = fileService.requestGenerate(event);
-            if(request != null) {
+            if (request != null) {
                 newPostThread(socket, request, null);
                 socketPool.removeIf(Objects::isNull);
             }
