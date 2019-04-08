@@ -32,19 +32,15 @@ public class ServerMain implements FileSystemObserver {
         try {
 
             String[] peers = configuration.get("peers").split(",");
-            ArrayList<HostPort> hostPorts = new ArrayList<>();
+//            ArrayList<HostPort> hostPorts = new ArrayList<>();
             ArrayList<Document> portsDoc = new ArrayList<>();
             HostPort local = new HostPort(configuration.get("advertisedName"), Integer.parseInt(configuration.get("port")));
             for (String peer : peers) {
                 HostPort hostPort = new HostPort(peer);
-                hostPorts.add(hostPort);
+//                hostPorts.add(hostPort);
                 portsDoc.add(hostPort.toDoc());
                 connectToPeer(hostPort, local, fileSystemManager);
             }
-
-
-
-
 
             //start Server
             new Thread(new Runnable() {
@@ -54,8 +50,23 @@ public class ServerMain implements FileSystemObserver {
                         ServerSocket serverSocket = new ServerSocket(local.port);
                         while (true) {
                             Socket socket = serverSocket.accept();
-                            //if there are too many socket, return connect refuse
-                            if (socketCount >= Integer.parseInt(configuration.get("maximumIncommingConnections"))) {
+                            // read a line of data from the stream
+                            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(),"UTF8"));
+                            String data = in.readLine();
+                            log.info(data);
+                            Document document = Document.parse(data);
+                            //the first data should be hand shake request
+                            if (!HANDSHAKE_REQUEST.equals(document.getString("command"))){
+                                Document invalid = new Document();
+
+                                invalid.append("command", INVALID_PROTOCOL);
+                                invalid.append("message", "wrong command");
+                                socketService.send(socket, invalid.toJson());
+                                //close socket
+                                socket.close();
+
+                            } else if (socketCount >= Integer.parseInt(configuration.get("maximumIncommingConnections"))) {
+                                //if there are too many socket, return connect refuse
                                 Document connectionRefused = new Document();
 
                                 connectionRefused.append("command", CONNECTION_REFUSED);
@@ -86,7 +97,6 @@ public class ServerMain implements FileSystemObserver {
                 }
             }).start();
 
-
             //start generateSync
             new Thread(new Runnable() {
                 @Override
@@ -111,10 +121,7 @@ public class ServerMain implements FileSystemObserver {
         }
 
 
-
     }
-
-
 
     @Override
     public void processFileSystemEvent(FileSystemEvent fileSystemEvent) {
@@ -132,7 +139,6 @@ public class ServerMain implements FileSystemObserver {
             log.warning(ex.getMessage());
         }
     }
-
 
     private boolean connectToPeer(HostPort hostPort, HostPort local, FileSystemManager manager) {
         boolean result = true;
