@@ -17,8 +17,9 @@ public class ServerMain implements FileSystemObserver {
     private static Logger log = Logger.getLogger(ServerMain.class.getName());
 
     public static List<Socket> socketPool = new Vector<>();
-    public static ArrayList<Document> connectSocket = new ArrayList<>();
-    public static ArrayList<HostPort> refusedSocket = new ArrayList<>();
+    //connect and refused host port information
+    private static List<HostPort> connectSocket = new Vector<>();
+    private static List<HostPort> refusedSocket = new Vector<>();
     private int socketCount = 0;
 
     private SocketService socketService = new SocketServiceImpl();
@@ -100,7 +101,12 @@ public class ServerMain implements FileSystemObserver {
                                     //if there are too many socket, return connect refuse
                                     Document connectionRefused = new Document();
                                     connectionRefused.append("command", CONNECTION_REFUSED);
-                                    connectionRefused.append("peers", connectSocket);
+                                    //get connect host port info
+                                    ArrayList<Document> peers = new ArrayList<>();
+                                    for(HostPort port : connectSocket){
+                                        peers.add(port.toDoc());
+                                    }
+                                    connectionRefused.append("peers", peers);
                                     socketService.send(socket, connectionRefused.toJson());
                                     //close socket
                                     socket.close();
@@ -114,7 +120,7 @@ public class ServerMain implements FileSystemObserver {
                                     //deal generalSync
                                     dealWithSync(socket, fileSystemManager.generateSyncEvents());
                                     Document newPort = (Document) document.get("hostPort");
-                                    connectSocket.add(newPort);
+                                    connectSocket.add(new HostPort(newPort));
                                     socketPool.add(socket);
                                     socketCount++;
                                     new SocketReceiveDealThread(fileSystemManager, socket, null).start();
@@ -151,7 +157,9 @@ public class ServerMain implements FileSystemObserver {
                     newPostThread(socket, request, index);
                     index++;
                 }
+                //delete null node
                 socketPool.removeIf(Objects::isNull);
+                connectSocket.removeIf(Objects::isNull);
             }
         } catch (Exception ex) {
             log.warning(ex.getMessage());
@@ -160,7 +168,7 @@ public class ServerMain implements FileSystemObserver {
 
     private boolean connectToPeer(HostPort hostPort, HostPort local, FileSystemManager manager) {
         // eliminate duplicate connections
-        if (connectSocket.contains(hostPort.toDoc())||refusedSocket.contains(hostPort)){
+        if (connectSocket.contains(hostPort)||refusedSocket.contains(hostPort)){
             return false;
         }
         boolean result = true;
@@ -181,8 +189,7 @@ public class ServerMain implements FileSystemObserver {
             Document handshakeResponse = Document.parse(data);
             //if success, then put into socketPool
             if (HANDSHAKE_RESPONSE.equals(handshakeResponse.getString("command"))) {
-                Document newPort = (Document) handshakeResponse.get("hostPort");
-                connectSocket.add(newPort);
+                connectSocket.add(hostPort);
                 socketPool.add(socket);
                 socketCount++;
                 //deal generalSync
@@ -250,7 +257,9 @@ public class ServerMain implements FileSystemObserver {
             Document request = fileService.requestGenerate(event);
             if (request != null) {
                 newPostThread(socket, request, null);
+                //delete null node
                 socketPool.removeIf(Objects::isNull);
+                connectSocket.removeIf(Objects::isNull);
             }
         }
     }
