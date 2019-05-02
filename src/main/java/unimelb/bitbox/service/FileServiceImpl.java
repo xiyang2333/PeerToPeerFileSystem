@@ -13,6 +13,8 @@ import java.nio.CharBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.logging.Logger;
 
 import static unimelb.bitbox.util.RequestUtil.*;
@@ -24,7 +26,8 @@ public class FileServiceImpl implements FileService {
     private Base64.Encoder encoder = Base64.getEncoder();
     private Base64.Decoder deCoder = Base64.getDecoder();
 
-    //TODO
+    private static Map<String, Integer> retryCount = new HashMap<>();
+
     @Override
     public Document requestGenerate(FileSystemEvent fileSystemEvent) {
         Document request = new Document();
@@ -52,7 +55,6 @@ public class FileServiceImpl implements FileService {
         return request;
     }
 
-    //TODO
     @Override
     public Document OperateAndResponseGenerate(Socket socket, Document request, FileSystemManager fileSystemManager) {
         Document response = new Document();
@@ -185,12 +187,17 @@ public class FileServiceImpl implements FileService {
                     break;
                 case FILE_BYTES_RESPONSE:
                     position = request.getLong("position");
+                    pathName = request.getString("pathName");
                     if (!request.getBoolean("status")) {
-                        log.warning("byte request fail");
-                        //try again
-                        getByte(socket, request, position);
+                        Integer count = retryCount.get(pathName);
+                        //try again if never try
+                        if(count != null && count != 0){
+                            retryCount.put(pathName, 1);
+                            //try again
+                            getByte(socket, request, position);
+                        }
+                        log.warning("byte request fail, retry times: " + count);
                     } else {
-                        pathName = request.getString("pathName");
                         length = request.getLong("length");
                         //write into file
                         fileSystemManager.writeFile(pathName, deCoder.decode(ByteBuffer.wrap(request.getString("content").getBytes())),
