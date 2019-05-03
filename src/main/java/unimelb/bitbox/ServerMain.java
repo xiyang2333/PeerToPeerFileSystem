@@ -20,6 +20,7 @@ public class ServerMain implements FileSystemObserver {
     //connect and refused host port information
     private static List<HostPort> connectSocket = new Vector<>();
     private static List<HostPort> refusedSocket = new Vector<>();
+    private static List<HostPort> inCome = new Vector<>();
     private int socketCount = 0;
 
     private SocketService socketService = new SocketServiceImpl();
@@ -123,6 +124,7 @@ public class ServerMain implements FileSystemObserver {
                                     connectSocket.add(new HostPort(newPort));
                                     socketPool.add(socket);
                                     socketCount++;
+                                    inCome.add(new HostPort(newPort));
                                     new SocketReceiveDealThread(fileSystemManager, socket, null).start();
                                 }
                             } catch (Exception ex) {
@@ -191,7 +193,6 @@ public class ServerMain implements FileSystemObserver {
             if (HANDSHAKE_RESPONSE.equals(handshakeResponse.getString("command"))) {
                 connectSocket.add(hostPort);
                 socketPool.add(socket);
-                socketCount++;
                 //deal generalSync
                 dealWithSync(socket, fileSystemManager.generateSyncEvents());
                 new SocketReceiveDealThread(manager, socket, in).start();
@@ -241,8 +242,12 @@ public class ServerMain implements FileSystemObserver {
             }
             if (socket != null && socket.isClosed()) {
                 //if disconnect set it to null
-                socketCount--;
                 if (index != null) {
+                    HostPort hostPort = connectSocket.get(index);
+                    if(inCome.contains(socketCount)){
+                        socketCount--;
+                        inCome.remove(hostPort);
+                    }
                     socketPool.set(index, null);
                     connectSocket.set(index,null);
                 }
