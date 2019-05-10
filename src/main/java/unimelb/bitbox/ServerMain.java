@@ -1,8 +1,10 @@
 package unimelb.bitbox;
 
 import java.io.*;
+import java.net.DatagramSocket;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.security.Key;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.logging.Logger;
@@ -18,39 +20,53 @@ public class ServerMain implements FileSystemObserver {
 
     public static List<Socket> socketPool = new Vector<>();
     //connect and refused host port information
-    private static List<HostPort> connectSocket = new Vector<>();
+    public static List<HostPort> connectSocket = new Vector<>();
     private static List<HostPort> refusedSocket = new Vector<>();
     private static List<HostPort> inCome = new Vector<>();
+    private HostPort localPort;
     private int socketCount = 0;
 
     private SocketService socketService = new SocketServiceImpl();
     private FileService fileService = new FileServiceImpl();
+
     protected FileSystemManager fileSystemManager;
+    protected ServerMain serverMain;
+
+
+    private CommunicationService comService = new CommunicationServiceImpl();
+    private RsaUtil rsaUtil = new RsaUtilImpl();
+    private AseUtil aseUtil = new AseUtilImpl();
+    public static Key aseKey;
+    private String ase128KeySeed = "cometGroup!@#$";
+
 
     public ServerMain() throws NumberFormatException, IOException, NoSuchAlgorithmException {
         fileSystemManager = new FileSystemManager(Configuration.getConfigurationValue("path"), this);
+        serverMain = this;
         //get configuration
         Map<String, String> configuration = Configuration.getConfiguration();
+        HostPort local = new HostPort(configuration.get("advertisedName"), Integer.parseInt(configuration.get("port")));
+        localPort = local;
+        String mode = configuration.get("mode");
 
-        //connect to other peers
-        try {
-
+        if (mode.equals("tcp")){
+            //tcp connection
             String[] peers = configuration.get("peers").split(",");
-//            ArrayList<HostPort> hostPorts = new ArrayList<>();
-//            ArrayList<Document> portsDoc = new ArrayList<>();
-            HostPort local = new HostPort(configuration.get("advertisedName"), Integer.parseInt(configuration.get("port")));
-            for (String peer : peers) {
-                HostPort hostPort = new HostPort(peer);
-//                hostPorts.add(hostPort);
-//                portsDoc.add(hostPort.toDoc());
-                //try connect to the other peer
-                new Thread(new Runnable() {
-                    @Override
-                    public void run() {
-                        connectToPeer(hostPort, local, fileSystemManager);
-                    }
-                }).start();
-            }
+            tcpConnection(peers);
+
+
+
+
+        }else if (mode.equals("udp")){
+           //udp connection
+
+
+
+        }else {
+
+            log.warning("no specific connection mode");
+        }
+
 
             //start generateSync
             new Thread(new Runnable() {
@@ -73,12 +89,12 @@ public class ServerMain implements FileSystemObserver {
             }).start();
 
             //start Server
-//            new Thread(new Runnable() {
-//                @Override
-//                public void run() {
+
             try {
+
                 ServerSocket serverSocket = new ServerSocket(local.port);
                 while (true) {
+
                     Socket socket = serverSocket.accept();
                     new Thread(new Runnable() {
                         @Override
@@ -90,42 +106,85 @@ public class ServerMain implements FileSystemObserver {
                                 log.info(data);
                                 Document document = Document.parse(data);
                                 //the first data should be hand shake request
-                                if (!HANDSHAKE_REQUEST.equals(document.getString("command"))) {
+                                if (HANDSHAKE_REQUEST.equals(document.getString("command"))) {
+
+                                    //if there are too many socket, return connect refuse
+                                    if (socketCount >= Integer.parseInt(configuration.get("maximumIncommingConnections"))) {
+                                        //if there are too many socket, return connect refuse
+                                        Document connectionRefused = new Document();
+                                        connectionRefused.append("command", CONNECTION_REFUSED);
+                                        //get connect host port info
+                                        ArrayList<Document> peers = new ArrayList<>();
+                                        for (HostPort port : ServerMain.connectSocket) {
+                                            peers.add(port.toDoc());
+                                        }
+                                        connectionRefused.append("peers", peers);
+                                        socketService.send(socket, connectionRefused.toJson());
+                                        //close socket
+                                        socket.close();
+
+
+                                    }else {
+                                        //if success, return response and add to socket pool
+                                        Document handshakeResponse = new Document();
+                                        handshakeResponse.append("command", HANDSHAKE_RESPONSE);
+                                        handshakeResponse.append("hostPort", new HostPort(local.host, local.port).toDoc());
+                                        socketService.send(socket, handshakeResponse.toJson());
+                                        //deal generalSync
+                                        dealWithSync(socket, fileSystemManager.generateSyncEvents());
+                                        Document newPort = (Document) document.get("hostPort");
+                                        connectSocket.add(new HostPort(newPort));
+                                        socketPool.add(socket);
+                                        socketCount++;
+                                        inCome.add(new HostPort(newPort));
+                                        new SocketReceiveDealThread(fileSystemManager, socket, null).start();
+
+                                    }
+
+
+
+                                } else if (AUTH_REQUEST.equals(document.getString("command"))) {
+
+                                    // deal with client request.
+
+                                    // generate aseKey in order to decode the following encoded requests.
+                                    // identify the public key which is used to encode aseKeyseed.
+                                    String aseName = document.getString("identity");
+                                    String publicKey = comService.getPublicKey(aseName,configuration.get("clientPort"));
+
+                                    if (publicKey == null){
+                                        //cannot find the public key
+                                        Document authDoc = new Document();
+                                        authDoc.append("command", AUTH_RESPONSE);
+                                        authDoc.append("status",AUTH_STATES_FALSE);
+                                        authDoc.append("message","public key not found");
+                                        socketService.send(socket, authDoc.toJson());
+                                        socket.close();
+
+                                    }else {
+                                        //find the public key
+                                        aseKey = aseUtil.getKey(ase128KeySeed);
+                                        Document authDoc = new Document();
+                                        authDoc.append("command", AUTH_RESPONSE);
+                                        authDoc.append("AES128", rsaUtil.encrypt(ase128KeySeed,publicKey));
+                                        authDoc.append("status","true");
+                                        authDoc.append("message","public key found");
+                                        socketService.send(socket, authDoc.toJson());
+                                        new ClientSocketReceivedDealThread(socket, null,serverMain).start();
+
+                                    }
+
+
+                                } else {
+
                                     Document invalid = new Document();
-                                    invalid.append("command", INVALID_PROTOCOL);
+                                    invalid.append("command", AUTH_RESPONSE);
+                                    invalid.append("status", "false");
                                     invalid.append("message", "wrong command");
                                     socketService.send(socket, invalid.toJson());
                                     //close socket
                                     socket.close();
 
-                                } else if (socketCount >= Integer.parseInt(configuration.get("maximumIncommingConnections"))) {
-                                    //if there are too many socket, return connect refuse
-                                    Document connectionRefused = new Document();
-                                    connectionRefused.append("command", CONNECTION_REFUSED);
-                                    //get connect host port info
-                                    ArrayList<Document> peers = new ArrayList<>();
-                                    for(HostPort port : connectSocket){
-                                        peers.add(port.toDoc());
-                                    }
-                                    connectionRefused.append("peers", peers);
-                                    socketService.send(socket, connectionRefused.toJson());
-                                    //close socket
-                                    socket.close();
-
-                                } else {
-                                    //if success, return response and add to socket pool
-                                    Document handshakeResponse = new Document();
-                                    handshakeResponse.append("command", HANDSHAKE_RESPONSE);
-                                    handshakeResponse.append("hostPort", new HostPort(local.host, local.port).toDoc());
-                                    socketService.send(socket, handshakeResponse.toJson());
-                                    //deal generalSync
-                                    dealWithSync(socket, fileSystemManager.generateSyncEvents());
-                                    Document newPort = (Document) document.get("hostPort");
-                                    connectSocket.add(new HostPort(newPort));
-                                    socketPool.add(socket);
-                                    socketCount++;
-                                    inCome.add(new HostPort(newPort));
-                                    new SocketReceiveDealThread(fileSystemManager, socket, null).start();
                                 }
                             } catch (Exception ex) {
 
@@ -141,9 +200,6 @@ public class ServerMain implements FileSystemObserver {
             }
 //                }
 //            }).start();
-        } catch (Exception ex) {
-            log.warning(ex.getMessage());
-        }
 
 
     }
@@ -216,16 +272,12 @@ public class ServerMain implements FileSystemObserver {
             }
         } catch (Exception ex) {
             log.warning(ex.getMessage());
-//            if (socket != null) {
-//                try {
-//                    socket.close();
-//                } catch (IOException ioE) {
-//                    log.warning("io problem: " + ioE.getMessage() + String.format("host: %s, port: %d", hostPort.host, hostPort.port));
-//                }
-//            }
+
         }
         return result;
     }
+
+
 
     private void newPostThread(Socket socket, Document request, Integer index) {
         try {
@@ -267,6 +319,80 @@ public class ServerMain implements FileSystemObserver {
                 connectSocket.removeIf(Objects::isNull);
             }
         }
+    }
+
+
+
+    //peer response
+    public boolean clientCommand(ClientManager clientManager){
+
+         if (clientManager.requesttype == REQUESTTYPE.CONNECT_PEER_REQUEST){
+
+             if(connectSocket.contains(clientManager.targetHostPort)){
+                 return true;
+             }
+             return connectToPeer(clientManager.targetHostPort,localPort,fileSystemManager);
+
+         }else if(clientManager.requesttype == REQUESTTYPE.DISCONNECT_PEER_REQUEST){
+
+             if(connectSocket.contains(clientManager.targetHostPort)){
+                 //disconnect to a peer
+
+
+                 try {
+
+                     int index = 0;
+                     for (Socket socket : socketPool) {
+                         HostPort p = connectSocket.get(index);
+                         if (p == clientManager.targetHostPort){
+                             socket.close();
+                             socketPool.set(index, null);
+                             connectSocket.set(index,null);
+                             break;
+                         }
+                         index++;
+                     }
+
+                 }catch (IOException e){
+
+                     log.warning(e.getMessage());
+                 }
+
+
+                 return true;
+             }
+
+             return false;
+         }
+
+
+         return false;
+    }
+
+
+
+
+    private void tcpConnection(String[] peers){
+
+        //connect to other peers
+        try {
+
+            for (String peer : peers) {
+                HostPort hostPort = new HostPort(peer);
+                //try connect to the other peer
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        connectToPeer(hostPort, localPort, fileSystemManager);
+                    }
+                }).start();
+            }
+        }catch (Exception ex) {
+            log.warning(ex.getMessage());
+
+        }
+
+        
     }
 
 }
