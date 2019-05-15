@@ -19,16 +19,18 @@ public class SocketReceiveDealThread extends Thread {
     private SocketService socketService = new SocketServiceImpl();
     private FileService fileService = new FileServiceImpl();
 
-
     private FileSystemManager fileSystemManager;
     private Socket socket;
     private BufferedReader in;
+
 
     public SocketReceiveDealThread(FileSystemManager manager, Socket socket, BufferedReader in) {
         this.fileSystemManager = manager;
         this.socket = socket;
         this.in = in;
+
     }
+
 
     @Override
     public void run() {
@@ -40,6 +42,7 @@ public class SocketReceiveDealThread extends Thread {
             while (socket.isConnected()) {
                 String data = in.readLine();
                 log.info(data);
+                //deal with the communication with other peers
                 Document response = fileService.OperateAndResponseGenerate(socket, Document.parse(data), fileSystemManager);
                 if (response != null) {
                     try {
@@ -48,7 +51,7 @@ public class SocketReceiveDealThread extends Thread {
                         if (INVALID_PROTOCOL.equals(response.getString("command"))) {
                             try {
                                 socket.close();
-                                if(in != null){
+                                if (in != null) {
                                     in.close();
                                 }
                                 writer.close();
@@ -56,6 +59,7 @@ public class SocketReceiveDealThread extends Thread {
                                 log.warning(e.getMessage());
                             }
                         } else {
+                            // it is seems like this part would not be executed forever.
                             try {
                                 List<Socket> socketList = ServerMain.socketPool;
                                 if (REQUEST_LIST.contains(response.getString("command"))) {
@@ -66,7 +70,7 @@ public class SocketReceiveDealThread extends Thread {
                                         }
                                     }
                                 }
-                            } catch (IOException e){
+                            } catch (IOException e) {
                                 log.warning(e.getMessage());
                             }
                         }
@@ -74,6 +78,7 @@ public class SocketReceiveDealThread extends Thread {
                         log.warning(e.getMessage());
                     }
                 }
+
             }
         } catch (Exception ex) {
             log.warning(ex.getMessage());
