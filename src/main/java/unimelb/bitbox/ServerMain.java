@@ -72,24 +72,24 @@ public class ServerMain implements FileSystemObserver {
         }
 
         //start generateSync
-//        new Thread(new Runnable() {
-//            @Override
-//            public void run() {
-//                try {
-//                    while (true) {
-//                        List<FileSystemEvent> events = fileSystemManager.generateSyncEvents();
-//                        for (FileSystemEvent event : events) {
-//                            processFileSystemEvent(event);
-//                        }
-//                        Thread.sleep(Integer.parseInt(configuration.get("syncInterval")) * 1000);
-//                    }
-//                } catch (InterruptedException e) {
-//                    log.warning("thread problem: " + e.getMessage());
-//                } catch (Exception ex) {
-//                    log.warning(ex.getMessage());
-//                }
-//            }
-//        }).start();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    while (true) {
+                        List<FileSystemEvent> events = fileSystemManager.generateSyncEvents();
+                        for (FileSystemEvent event : events) {
+                            processFileSystemEvent(event);
+                        }
+                        Thread.sleep(Integer.parseInt(configuration.get("syncInterval")) * 1000);
+                    }
+                } catch (InterruptedException e) {
+                    log.warning("thread problem: " + e.getMessage());
+                } catch (Exception ex) {
+                    log.warning(ex.getMessage());
+                }
+            }
+        }).start();
 
 
         //still leave it here to support client connection request.
