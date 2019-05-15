@@ -2,7 +2,6 @@ package unimelb.bitbox.service;
 
 /**
  * @Author: XIGUANG LI <xiguangl@student.unimelb.edu.au>
- * @Purpose: XIGUANGL
  **/
 public interface RsaUtil {
 

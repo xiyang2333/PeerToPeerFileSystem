@@ -16,7 +16,6 @@ import static unimelb.bitbox.util.RequestUtil.*;
 
 /**
  * @Author: XIGUANG LI <xiguangl@student.unimelb.edu.au>
- * @Purpose: XIGUANGL
  **/
 public class ClientMainService {
 
@@ -31,6 +30,7 @@ public class ClientMainService {
     private RsaUtil rsaUtil = new RsaUtilImpl();
     private AseUtil aseUtil = new AseUtilImpl();
 
+    // the private key file
     private String PRIVATE_KEY_FILE = "bitboxclient_rsa.pem";
 
 

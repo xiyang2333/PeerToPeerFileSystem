@@ -9,7 +9,6 @@ import java.util.logging.Logger;
 
 /**
  * @Author: XIGUANG LI <xiguangl@student.unimelb.edu.au>
- * @Purpose: XIGUANGL
  **/
 public class AseUtilImpl implements AseUtil{
 

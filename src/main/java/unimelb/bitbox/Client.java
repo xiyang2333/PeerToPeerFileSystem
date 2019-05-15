@@ -26,6 +26,7 @@ public class Client {
                 "[%1$tc] %2$s %4$s: %5$s%n");
         log.info("Client starting...");
 
+
         // parse args
         ClientManager clientManager = ParserService.parserCommandLine(args);
         // execute commandline

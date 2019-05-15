@@ -7,6 +7,24 @@ import java.util.List;
  * Created by xiyang on 2019/3/26
  */
 public interface RequestUtil {
+    //Client
+    public final static String AUTH_REQUEST = "AUTH_REQUEST";
+    public final static String AUTH_RESPONSE = "AUTH_RESPONSE";
+    public final static String AUTH_STATES_TRUE = "true";
+    public final static String AUTH_STATES_FALSE = "false";
+    public final static String LIST_PEERS_REQUEST = "LIST_PEERS_REQUEST";
+    public final static String LIST_PEERS_RESPONSE = "LIST_PEERS_RESPONSE";
+
+    public final static String CONNECT_PEER_REQUEST = "CONNECT_PEER_REQUEST";
+    public final static String CONNECT_PEER_RESPONSE = "CONNECT_PEER_RESPONSE";
+
+    public final static String DISCONNECT_PEER_REQUEST = "DISCONNECT_PEER_REQUEST";
+    public final static String DISCONNECT_PEER_RESPONSE = "DISCONNECT_PEER_RESPONSE";
+
+
+
+
+    //Peer
     public final static String INVALID_PROTOCOL = "INVALID_PROTOCOL";
     public final static String CONNECTION_REFUSED = "CONNECTION_REFUSED";
     public final static String HANDSHAKE_REQUEST = "HANDSHAKE_REQUEST";
@@ -26,5 +44,8 @@ public interface RequestUtil {
 
     public final static List<String> REQUEST_LIST = Arrays.asList(FILE_CREATE_REQUEST, FILE_DELETE_REQUEST,
             FILE_MODIFY_REQUEST, DIRECTORY_CREATE_REQUEST, DIRECTORY_DELETE_REQUEST);
+
+    public final static List<String> PEER_RESPONSE_LIST = Arrays.asList(LIST_PEERS_RESPONSE, CONNECT_PEER_RESPONSE,
+            DISCONNECT_PEER_RESPONSE);
 
 }

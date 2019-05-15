@@ -47,8 +47,10 @@ public class ClientSocketReceivedDealThread extends Thread {
 
                     if (serverMain == null){
 
-                        //client receives responses, and just print.
+                        //client receives responses, and just print then close socket .
                         log.info("client" + payload.toJson());
+                        //At the completion of the command the client disconnects.
+                        socket.close();
 
 
                     }else {

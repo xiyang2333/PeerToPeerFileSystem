@@ -9,7 +9,6 @@ import unimelb.bitbox.util.*;
 
 /**
  * @Author: XIGUANG LI <xiguangl@student.unimelb.edu.au>
- * @Purpose: XIGUANGL
  **/
 public class CmdParserImpl implements CmdParser{
 
@@ -40,9 +39,17 @@ public class CmdParserImpl implements CmdParser{
                 .desc("target port")
                 .build();
 
+        Option i = Option.builder("i")
+                .required(true)
+                .hasArg()
+                .argName("identity")
+                .desc("public key identity")
+                .build();
+
         options.addOption(c);
         options.addOption(s);
         options.addOption(p);
+        options.addOption(i);
 
         CommandLineParser parser = new DefaultParser();
         CommandLine cmd;
@@ -75,6 +82,13 @@ public class CmdParserImpl implements CmdParser{
             if (cmd.hasOption("s")){
                 String localPort = cmd.getOptionValue("s");
                 clientManager.hostPort = new HostPort(localPort);
+
+
+            }
+
+            if (cmd.hasOption("i")){
+
+                clientManager.identity = cmd.getOptionValue("i");
 
 
             }

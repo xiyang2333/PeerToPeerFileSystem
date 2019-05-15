@@ -8,7 +8,6 @@ import java.net.Socket;
 
 /**
  * @Author: XIGUANG LI <xiguangl@student.unimelb.edu.au>
- * @Purpose: XIGUANGL
  **/
 public interface CommunicationService {
 

@@ -9,7 +9,6 @@ import java.security.Key;
 
 /**
  * @Author: XIGUANG LI <xiguangl@student.unimelb.edu.au>
- * @Purpose: XIGUANGL
  **/
 public class ClientManager {
 
@@ -21,6 +20,9 @@ public class ClientManager {
     public HostPort hostPort;
 
     public HostPort targetHostPort;
+
+    public String identity;
+
 
 
 

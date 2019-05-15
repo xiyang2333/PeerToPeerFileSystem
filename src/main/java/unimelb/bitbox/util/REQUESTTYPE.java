@@ -2,7 +2,6 @@ package unimelb.bitbox.util;
 
 /**
  * @Author: XIGUANG LI <xiguangl@student.unimelb.edu.au>
- * @Purpose: XIGUANGL
  **/
 public enum REQUESTTYPE {
 

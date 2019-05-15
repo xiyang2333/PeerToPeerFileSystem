@@ -3,7 +3,6 @@ package unimelb.bitbox.service;
 import unimelb.bitbox.ServerMain;
 import unimelb.bitbox.util.*;
 
-import java.net.Socket;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.logging.Logger;
