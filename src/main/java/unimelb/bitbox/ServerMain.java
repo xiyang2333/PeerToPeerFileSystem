@@ -26,24 +26,21 @@ public class ServerMain implements FileSystemObserver {
     private String mode;
     private int blockSize;
 
-
     private int socketCount = 0;
 
     private SocketService socketService = new SocketServiceImpl();
     private FileService fileService = new FileServiceImpl();
-    ;
 
     protected FileSystemManager fileSystemManager;
     protected ServerMain serverMain;
 
-
     private CommunicationService comService = new CommunicationServiceImpl();
+    private static ClientManager clientManager = new ClientManager();
     private RsaUtil rsaUtil = new RsaUtilImpl();
     private AseUtil aseUtil = new AseUtilImpl();
     public static Key aseKey;
     private String ase128KeySeed = "cometGroup!@#$";
     Map<String, String> configuration = Configuration.getConfiguration();
-
 
 
     public ServerMain() throws NumberFormatException, IOException, NoSuchAlgorithmException {
@@ -54,22 +51,6 @@ public class ServerMain implements FileSystemObserver {
         localPort = local;
         mode = configuration.get("mode");
         blockSize = Integer.parseInt(configuration.get("updblockSize"));
-
-        if (mode.equals("tcp")){
-            //tcp connection
-            String[] peers = configuration.get("peers").split(",");
-            tcpConnection(peers);
-
-        }else if (mode.equals("udp")){
-           //don't need to establish connections, and just start udp server.
-
-//            startUdpServer();
-
-
-        }else {
-
-            log.warning("no specific connection mode");
-        }
 
         //start generateSync
         new Thread(new Runnable() {
@@ -91,13 +72,29 @@ public class ServerMain implements FileSystemObserver {
             }
         }).start();
 
-
         //still leave it here to support client connection request.
-        startTcpServer();
+//        startTcpServer();
+        //start client server
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                startClientServer();
+            }
+        }).start();
 
+        if (mode.equals("tcp")) {
+            //tcp connection
+            String[] peers = configuration.get("peers").split(",");
+            tcpConnection(peers);
 
-
-
+            //still leave it here to support client connection request.
+            startTcpServer();
+        } else if (mode.equals("udp")) {
+            //don't need to establish connections, and just start udp server.
+//            startUdpServer();\
+        } else {
+            log.warning("no specific connection mode");
+        }
 
     }
 
@@ -112,46 +109,104 @@ public class ServerMain implements FileSystemObserver {
 
                     byte[] buf = new byte[blockSize];
                     DatagramSocket socket = new DatagramSocket(localPort.port);
-                    DatagramPacket receivePacket = new DatagramPacket(buf,blockSize);
+                    DatagramPacket receivePacket = new DatagramPacket(buf, blockSize);
                     while (true) {
                         socket.receive(receivePacket);
                         //do some action based on the requset.
-                        String request = new String(receivePacket.getData(),0,receivePacket.getLength(),"UTF-8");
-
+                        String request = new String(receivePacket.getData(), 0, receivePacket.getLength(), "UTF-8");
 
                         Document response = fileService.newOperateAndResponseGenerate(Document.parse(request), fileSystemManager);
                         //still need to do some work here.
-                        if (response != null){
+                        if (response != null) {
                             byte[] message = response.toJson().getBytes("UTF-8");
                             DatagramPacket send = new DatagramPacket(message, message.length, receivePacket.getAddress(), receivePacket.getPort());
                             socket.send(send);
-
-                        }else {
-
+                        } else {
 
                         }
-
-
                         receivePacket.setLength(blockSize);
-
-
                     }
 
-                }catch (IOException i){
+                } catch (IOException i) {
                     log.warning(i.getMessage());
                 }
-
-
             }
-        }){
-
-        }.start();
-
-
-
+        }).start();
     }
 
-    private void startTcpServer(){
+    private void startClientServer() {
+        try {
+            ServerSocket serverSocket = new ServerSocket(Integer.parseInt(configuration.get("clientPort")));
+            while (true) {
+                Socket socket = serverSocket.accept();
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF8"));
+                            String data = in.readLine();
+                            log.info(data);
+                            Document document = Document.parse(data);
+                            if (AUTH_REQUEST.equals(document.getString("command"))) {
+                                // deal with client request.
+
+                                // generate aseKey in order to decode the following encoded requests.
+                                // identify the public key which is used to encode aseKeyseed.
+                                String aseName = document.getString("identity");
+                                String publicKey = comService.getPublicKey(aseName, configuration.get("authorized_keys"));
+                                if (publicKey == null) {
+                                    //cannot find the public key
+                                    Document authDoc = new Document();
+                                    authDoc.append("command", AUTH_RESPONSE);
+                                    authDoc.append("status", AUTH_STATES_FALSE);
+                                    authDoc.append("message", "public key not found");
+                                    socketService.send(socket, authDoc.toJson());
+                                    socket.close();
+                                } else {
+                                    //find the public key
+                                    aseKey = aseUtil.getKey(ase128KeySeed);
+                                    Document authDoc = new Document();
+                                    authDoc.append("command", AUTH_RESPONSE);
+                                    authDoc.append("AES128", rsaUtil.encrypt(ase128KeySeed, publicKey));
+                                    authDoc.append("status", "true");
+                                    authDoc.append("message", "public key found");
+                                    socketService.send(socket, authDoc.toJson());
+
+                                    // if success there will be one more request
+                                    data = in.readLine();
+                                    log.info(data);
+                                    //deal with the communication with client request
+                                    Document payload = comService.clientAndPeerResponse(clientManager.decodePayload(Document.parse(data)),serverMain);
+
+                                    //peer receives request, and gives responses.
+                                    if (PEER_RESPONSE_LIST.contains(payload.getString("command"))) {
+                                        String cipherText = aseUtil.encrypt(payload.toJson(), ServerMain.aseKey);
+                                        Document response = new Document();
+                                        response.append("payload", cipherText);
+                                        socketService.send(socket, response.toJson());
+                                    }
+
+                                    //finish and close the socket
+                                    socket.close();
+//                                    new ClientSocketReceivedDealThread(socket, in, serverMain).start();
+                                }
+                            }
+                        } catch (IOException e) {
+                            log.warning(e.getMessage());
+                        } catch (Exception ex) {
+                            log.warning(ex.getMessage());
+                        }
+                    }
+                }).start();
+            }
+        } catch (IOException e) {
+            log.warning(e.getMessage());
+        } catch (Exception ex) {
+            log.warning(ex.getMessage());
+        }
+    }
+
+    private void startTcpServer() {
 
         //start Server
         try {
@@ -185,9 +240,7 @@ public class ServerMain implements FileSystemObserver {
                                     socketService.send(socket, connectionRefused.toJson());
                                     //close socket
                                     socket.close();
-
-
-                                }else {
+                                } else {
                                     //if success, return response and add to socket pool
                                     Document handshakeResponse = new Document();
                                     handshakeResponse.append("command", HANDSHAKE_RESPONSE);
@@ -201,45 +254,34 @@ public class ServerMain implements FileSystemObserver {
                                     socketCount++;
                                     inCome.add(new HostPort(newPort));
                                     new SocketReceiveDealThread(fileSystemManager, socket, null).start();
-
                                 }
-
-
-
-                            } else if (AUTH_REQUEST.equals(document.getString("command"))) {
-
-                                // deal with client request.
-
-                                // generate aseKey in order to decode the following encoded requests.
-                                // identify the public key which is used to encode aseKeyseed.
-                                String aseName = document.getString("identity");
-                                String publicKey = comService.getPublicKey(aseName,configuration.get("clientPort"));
-
-                                if (publicKey == null){
-                                    //cannot find the public key
-                                    Document authDoc = new Document();
-                                    authDoc.append("command", AUTH_RESPONSE);
-                                    authDoc.append("status",AUTH_STATES_FALSE);
-                                    authDoc.append("message","public key not found");
-                                    socketService.send(socket, authDoc.toJson());
-                                    socket.close();
-
-                                }else {
-                                    //find the public key
-                                    aseKey = aseUtil.getKey(ase128KeySeed);
-                                    Document authDoc = new Document();
-                                    authDoc.append("command", AUTH_RESPONSE);
-                                    authDoc.append("AES128", rsaUtil.encrypt(ase128KeySeed,publicKey));
-                                    authDoc.append("status","true");
-                                    authDoc.append("message","public key found");
-                                    socketService.send(socket, authDoc.toJson());
-                                    new ClientSocketReceivedDealThread(socket, null,serverMain).start();
-
-                                }
-
-
+//                            } else if (AUTH_REQUEST.equals(document.getString("command"))) {
+//                                // deal with client request.
+//
+//                                // generate aseKey in order to decode the following encoded requests.
+//                                // identify the public key which is used to encode aseKeyseed.
+//                                String aseName = document.getString("identity");
+//                                String publicKey = comService.getPublicKey(aseName,configuration.get("clientPort"));
+//                                if (publicKey == null){
+//                                    //cannot find the public key
+//                                    Document authDoc = new Document();
+//                                    authDoc.append("command", AUTH_RESPONSE);
+//                                    authDoc.append("status",AUTH_STATES_FALSE);
+//                                    authDoc.append("message","public key not found");
+//                                    socketService.send(socket, authDoc.toJson());
+//                                    socket.close();
+//                                }else {
+//                                    //find the public key
+//                                    aseKey = aseUtil.getKey(ase128KeySeed);
+//                                    Document authDoc = new Document();
+//                                    authDoc.append("command", AUTH_RESPONSE);
+//                                    authDoc.append("AES128", rsaUtil.encrypt(ase128KeySeed,publicKey));
+//                                    authDoc.append("status","true");
+//                                    authDoc.append("message","public key found");
+//                                    socketService.send(socket, authDoc.toJson());
+//                                    new ClientSocketReceivedDealThread(socket, null,serverMain).start();
+//                                }
                             } else {
-
                                 Document invalid = new Document();
                                 invalid.append("command", AUTH_RESPONSE);
                                 invalid.append("status", "false");
@@ -247,7 +289,6 @@ public class ServerMain implements FileSystemObserver {
                                 socketService.send(socket, invalid.toJson());
                                 //close socket
                                 socket.close();
-
                             }
                         } catch (Exception ex) {
 
@@ -271,18 +312,18 @@ public class ServerMain implements FileSystemObserver {
         try {
             Document request = fileService.requestGenerate(fileSystemEvent);
             if (request != null) {
-               if (mode.equals("tcp")){
-                   tcpProcess(request);
+                if (mode.equals("tcp")) {
+                    tcpProcess(request);
 
-               }else if (mode.equals("udp")){
-                   log.info(request.toJson());
-                   udpProcess(request);
+                } else if (mode.equals("udp")) {
+                    log.info(request.toJson());
+                    udpProcess(request);
 
-               }else {
+                } else {
 
-                   log.warning("Connection mode is not set");
+                    log.warning("Connection mode is not set");
 
-               }
+                }
 
             }
         } catch (Exception ex) {
@@ -290,7 +331,7 @@ public class ServerMain implements FileSystemObserver {
         }
     }
 
-    private void tcpProcess(Document request){
+    private void tcpProcess(Document request) {
         int index = 0;
         for (Socket socket : socketPool) {
             newPostThread(socket, request, index);
@@ -301,7 +342,7 @@ public class ServerMain implements FileSystemObserver {
         connectSocket.removeIf(Objects::isNull);
     }
 
-    private void udpProcess(Document request){
+    private void udpProcess(Document request) {
 
 
         String[] peers = configuration.get("udpPort").split(",");
@@ -311,16 +352,13 @@ public class ServerMain implements FileSystemObserver {
             new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    udpSendAndResponse(request,hostPort);
+                    udpSendAndResponse(request, hostPort);
                 }
             }).start();
         }
-
-
-
     }
 
-    private void udpSendAndResponse(Document request,HostPort hostPort){
+    private void udpSendAndResponse(Document request, HostPort hostPort) {
 
         int TIMEOUT = 5000;
         int MAXNUM = 5;
@@ -331,83 +369,65 @@ public class ServerMain implements FileSystemObserver {
             socket = new DatagramSocket();
             byte[] message = request.toJson().getBytes("UTF-8");
             InetAddress host = InetAddress.getByName(hostPort.host);
-            DatagramPacket sendPacket = new DatagramPacket(message,message.length,host,hostPort.port);
+            DatagramPacket sendPacket = new DatagramPacket(message, message.length, host, hostPort.port);
             DatagramPacket receivePacket = new DatagramPacket(buf, blockSize);
             //set timeout
             socket.setSoTimeout(TIMEOUT);
             // retry times.
             int tries = 0;
             boolean receivedResponse = false;
-            while(!receivedResponse && tries<MAXNUM){
+            while (!receivedResponse && tries < MAXNUM) {
                 socket.send(sendPacket);
 
-                try{
+                try {
                     socket.receive(receivePacket);
 
-                    if(!receivePacket.getAddress().equals(host)){
+                    if (!receivePacket.getAddress().equals(host)) {
                         throw new IOException("Packet from an umknown source");
-                    }else {
-                       // do some action
-                        String ServerMessage = new String(receivePacket.getData(),0,receivePacket.getLength(),"UTF-8");
-
+                    } else {
+                        // do some action
+                        String ServerMessage = new String(receivePacket.getData(), 0, receivePacket.getLength(), "UTF-8");
                         Document response = fileService.newOperateAndResponseGenerate(Document.parse(ServerMessage), fileSystemManager);
-
-
                         //do some work here.
-                        if (response != null){
-
+                        if (response != null) {
                             //continue use this DatagramSocket to send message to guarantee the order of packet.
                             tries = 0;
                             receivedResponse = false;
                             receivePacket.setLength(blockSize);
                             byte[] responseMessage = response.toJson().getBytes("UTF-8");
-                            sendPacket = new DatagramPacket(responseMessage,responseMessage.length,host,hostPort.port);
-
-
-
-                        }else {
-
-
+                            sendPacket = new DatagramPacket(responseMessage, responseMessage.length, host, hostPort.port);
+                        } else {
                             // no need to make extra communication and exit the loop.
                             receivedResponse = true;
-
                         }
-
                     }
-
-                }catch(InterruptedIOException e){
+                } catch (InterruptedIOException e) {
                     tries += 1;
-                    log.warning("Time out," + (MAXNUM - tries) + " more tries..." );
+                    log.warning("Time out," + (MAXNUM - tries) + " more tries...");
                 }
             }
 
-            if(receivedResponse){
-
+            if (receivedResponse) {
                 receivePacket.setLength(blockSize);
-
-
-            }else{
+            } else {
                 log.warning("No response to " + hostPort.toString());
             }
             socket.close();
 
-
-        }catch (SocketException s){
+        } catch (SocketException s) {
             log.warning(s.getMessage());
-        }catch (UnknownHostException u){
+        } catch (UnknownHostException u) {
             log.warning(u.getMessage());
-        }catch (IOException e){
+        } catch (IOException e) {
             log.warning(e.getMessage());
         }
 
     }
 
 
-
-
     private boolean connectToPeer(HostPort hostPort, HostPort local, FileSystemManager manager) {
         // eliminate duplicate connections
-        if (connectSocket.contains(hostPort)||refusedSocket.contains(hostPort)){
+        if (connectSocket.contains(hostPort) || refusedSocket.contains(hostPort)) {
             return false;
         }
         boolean result = true;
@@ -459,7 +479,6 @@ public class ServerMain implements FileSystemObserver {
     }
 
 
-
     private void newPostThread(Socket socket, Document request, Integer index) {
         try {
             if (socket != null && socket.isConnected()) {
@@ -477,12 +496,12 @@ public class ServerMain implements FileSystemObserver {
                 //if disconnect set it to null
                 if (index != null) {
                     HostPort hostPort = connectSocket.get(index);
-                    if(inCome.contains(socketCount)){
+                    if (inCome.contains(hostPort)) {
                         socketCount--;
                         inCome.remove(hostPort);
                     }
                     socketPool.set(index, null);
-                    connectSocket.set(index,null);
+                    connectSocket.set(index, null);
                 }
             }
         } catch (IOException e) {
@@ -503,7 +522,7 @@ public class ServerMain implements FileSystemObserver {
     }
 
 
-    private void tcpConnection(String[] peers){
+    private void tcpConnection(String[] peers) {
 
         //connect to other peers
         try {
@@ -518,7 +537,7 @@ public class ServerMain implements FileSystemObserver {
                     }
                 }).start();
             }
-        }catch (Exception ex) {
+        } catch (Exception ex) {
             log.warning(ex.getMessage());
 
         }
@@ -528,57 +547,46 @@ public class ServerMain implements FileSystemObserver {
 
 
     //peer response
-    public boolean clientCommand(ClientManager clientManager){
+    public boolean clientCommand(ClientManager clientManager) {
+//
+//         if (mode.equals("udp")){
+//
+//             log.warning("unsupported connection mode");
+//             return false;
+//
+//         }
 
-         if (mode.equals("udp")){
+        if (clientManager.requesttype == REQUESTTYPE.CONNECT_PEER_REQUEST) {
+            if (connectSocket.contains(clientManager.targetHostPort)) {
+                return true;
+            }
+            return connectToPeer(clientManager.targetHostPort, localPort, fileSystemManager);
+        } else if (clientManager.requesttype == REQUESTTYPE.DISCONNECT_PEER_REQUEST) {
 
-             log.warning("unsupported connection mode");
-             return false;
-
-         }
-
-
-         if (clientManager.requesttype == REQUESTTYPE.CONNECT_PEER_REQUEST){
-
-             if(connectSocket.contains(clientManager.targetHostPort)){
-                 return true;
-             }
-             return connectToPeer(clientManager.targetHostPort,localPort,fileSystemManager);
-
-         }else if(clientManager.requesttype == REQUESTTYPE.DISCONNECT_PEER_REQUEST){
-
-             if(connectSocket.contains(clientManager.targetHostPort)){
-                 //disconnect to a peer
-
-
-                 try {
-
-                     int index = 0;
-                     for (Socket socket : socketPool) {
-                         HostPort p = connectSocket.get(index);
-                         if (p == clientManager.targetHostPort){
-                             socket.close();
-                             socketPool.set(index, null);
-                             connectSocket.set(index,null);
-                             break;
-                         }
-                         index++;
-                     }
-
-                 }catch (IOException e){
-
-                     log.warning(e.getMessage());
-                 }
-
-
-                 return true;
-             }
-
-             return false;
-         }
-
-
-         return false;
+            if (connectSocket.contains(clientManager.targetHostPort)) {
+                //disconnect to a peer
+                try {
+                    int index = 0;
+                    for (Socket socket : socketPool) {
+                        HostPort p = connectSocket.get(index);
+                        if (p.equals(clientManager.targetHostPort)) {
+                            socket.close();
+                            socketPool.set(index, null);
+                            connectSocket.set(index, null);
+                            break;
+                        }
+                        index++;
+                    }
+                    socketPool.removeIf(Objects::isNull);
+                    connectSocket.removeIf(Objects::isNull);
+                } catch (IOException e) {
+                    log.warning(e.getMessage());
+                }
+                return true;
+            }
+            return false;
+        }
+        return false;
     }
 
 }
