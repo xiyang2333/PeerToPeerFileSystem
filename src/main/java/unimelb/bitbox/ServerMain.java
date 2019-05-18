@@ -90,16 +90,44 @@ public class ServerMain implements FileSystemObserver {
             //still leave it here to support client connection request.
             startTcpServer();
         } else if (mode.equals("udp")) {
+            String[] peers = configuration.get("peers").split(",");
+            udpConnection(peers);
             //don't need to establish connections, and just start udp server.
-//            startUdpServer();\
+            startUdpServer();
         } else {
             log.warning("no specific connection mode");
         }
 
     }
 
-    private void startUdpServer() {
+    private void udpConnection(String[] peers){
+        try {
 
+            for (String peer : peers) {
+                HostPort hostPort = new HostPort(peer);
+                //try connect to the other peer
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+
+                        try {
+                            Document handshakeRequest = new Document();
+                            handshakeRequest.append("command", HANDSHAKE_REQUEST);
+                            handshakeRequest.append("hostPort", localPort.toDoc());
+                            udpSendAndResponse(handshakeRequest, hostPort);
+                        } catch (Exception e) {
+                            log.warning(e.getMessage());
+                        }
+                    }
+                }).start();
+            }
+        } catch (Exception ex) {
+            log.warning(ex.getMessage());
+
+        }
+    }
+
+    private void startUdpServer() {
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -115,9 +143,40 @@ public class ServerMain implements FileSystemObserver {
                         //do some action based on the requset.
                         String request = new String(receivePacket.getData(), 0, receivePacket.getLength(), "UTF-8");
 
-                        Document response = fileService.newOperateAndResponseGenerate(Document.parse(request), fileSystemManager);
+                        log.info(request);
+                        //do handshake only
+                        Document requestDoc = Document.parse(request);
+                        Document response = null;
+                        boolean handRequestFlag = false;
+                        if(HANDSHAKE_REQUEST.equals(requestDoc.getString("command"))){
+                            if (socketCount >= Integer.parseInt(configuration.get("maximumIncommingConnections"))) {
+                                //if there are too many socket, return connect refuse
+                                response = new Document();
+                                response.append("command", CONNECTION_REFUSED);
+                                //get connect host port info
+                                ArrayList<Document> peers = new ArrayList<>();
+                                for (HostPort port : ServerMain.connectSocket) {
+                                    peers.add(port.toDoc());
+                                }
+                                response.append("peers", peers);
+                            } else {
+                                //if success, return response and add to socket pool
+                                response = new Document();
+                                response.append("command", HANDSHAKE_RESPONSE);
+                                response.append("hostPort", new HostPort(localPort.host, localPort.port).toDoc());
+                                Document newPort = (Document) requestDoc.get("hostPort");
+                                connectSocket.add(new HostPort(newPort));
+                                socketCount++;
+                                inCome.add(new HostPort(newPort));
+                                handRequestFlag = true;
+                            }
+                        } else {
+                            response = fileService.newOperateAndResponseGenerate(requestDoc, fileSystemManager);
+                        }
+
                         //still need to do some work here.
                         if (response != null) {
+                            log.info(response.toJson());
                             byte[] message = response.toJson().getBytes("UTF-8");
                             DatagramPacket send = new DatagramPacket(message, message.length, receivePacket.getAddress(), receivePacket.getPort());
                             socket.send(send);
@@ -125,6 +184,11 @@ public class ServerMain implements FileSystemObserver {
 
                         }
                         receivePacket.setLength(blockSize);
+
+                        if(handRequestFlag){
+                            //deal first sync
+                            dealUdpSync(new HostPort((Document) requestDoc.get("hostPort")) ,fileSystemManager.generateSyncEvents());
+                        }
                     }
 
                 } catch (IOException i) {
@@ -317,7 +381,7 @@ public class ServerMain implements FileSystemObserver {
 
                 } else if (mode.equals("udp")) {
                     log.info(request.toJson());
-                    udpProcess(request);
+                    udpProcess(request, connectSocket);
 
                 } else {
 
@@ -342,13 +406,13 @@ public class ServerMain implements FileSystemObserver {
         connectSocket.removeIf(Objects::isNull);
     }
 
-    private void udpProcess(Document request) {
+    private void udpProcess(Document request, List<HostPort> hostPorts) {
 
 
-        String[] peers = configuration.get("udpPort").split(",");
+//        String[] peers = configuration.get("udpPort").split(",");
 
-        for (String peer : peers) {
-            HostPort hostPort = new HostPort(peer);
+        for (HostPort hostPort : connectSocket) {
+//            HostPort hostPort = new HostPort(peer);
             new Thread(new Runnable() {
                 @Override
                 public void run() {
@@ -361,7 +425,8 @@ public class ServerMain implements FileSystemObserver {
     private void udpSendAndResponse(Document request, HostPort hostPort) {
 
         int TIMEOUT = 5000;
-        int MAXNUM = 5;
+        String retry = configuration.get("retryNumber");
+        int MAXNUM = retry != null && !"".equals(retry) ? Integer.parseInt(retry) : 5;
         DatagramSocket socket = null;
         try {
 
@@ -509,6 +574,15 @@ public class ServerMain implements FileSystemObserver {
         }
     }
 
+    private void dealUdpSync(HostPort hostPort, List<FileSystemEvent> events){
+        for (FileSystemEvent event : events) {
+            Document request = fileService.requestGenerate(event);
+            if(request != null){
+                udpSendAndResponse(request, hostPort);
+            }
+        }
+    }
+
     public void dealWithSync(Socket socket, List<FileSystemEvent> events) {
         for (FileSystemEvent event : events) {
             Document request = fileService.requestGenerate(event);
@@ -549,12 +623,12 @@ public class ServerMain implements FileSystemObserver {
     //peer response
     public boolean clientCommand(ClientManager clientManager) {
 //
-//         if (mode.equals("udp")){
-//
-//             log.warning("unsupported connection mode");
-//             return false;
-//
-//         }
+         if (mode.equals("udp")){
+
+             log.warning("unsupported connection mode");
+             return false;
+
+         }
 
         if (clientManager.requesttype == REQUESTTYPE.CONNECT_PEER_REQUEST) {
             if (connectSocket.contains(clientManager.targetHostPort)) {
