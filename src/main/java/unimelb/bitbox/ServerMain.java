@@ -165,9 +165,14 @@ public class ServerMain implements FileSystemObserver {
                                 response.append("command", HANDSHAKE_RESPONSE);
                                 response.append("hostPort", new HostPort(localPort.host, localPort.port).toDoc());
                                 Document newPort = (Document) requestDoc.get("hostPort");
-                                connectSocket.add(new HostPort(newPort));
-                                socketCount++;
-                                inCome.add(new HostPort(newPort));
+                                HostPort newHost = new HostPort(newPort);
+                                if(!connectSocket.contains(newHost)) {
+                                    connectSocket.add(new HostPort(newPort));
+                                    if(!inCome.contains(newHost)){
+                                        socketCount++;
+                                        inCome.add(new HostPort(newPort));
+                                    }
+                                }
                                 handRequestFlag = true;
                             }
                         } else {
@@ -432,6 +437,7 @@ public class ServerMain implements FileSystemObserver {
 
             byte[] buf = new byte[blockSize];
             socket = new DatagramSocket();
+            log.info(request.toJson());
             byte[] message = request.toJson().getBytes("UTF-8");
             InetAddress host = InetAddress.getByName(hostPort.host);
             DatagramPacket sendPacket = new DatagramPacket(message, message.length, host, hostPort.port);
@@ -450,20 +456,36 @@ public class ServerMain implements FileSystemObserver {
                     if (!receivePacket.getAddress().equals(host)) {
                         throw new IOException("Packet from an umknown source");
                     } else {
-                        // do some action
-                        String ServerMessage = new String(receivePacket.getData(), 0, receivePacket.getLength(), "UTF-8");
-                        Document response = fileService.newOperateAndResponseGenerate(Document.parse(ServerMessage), fileSystemManager);
-                        //do some work here.
-                        if (response != null) {
-                            //continue use this DatagramSocket to send message to guarantee the order of packet.
-                            tries = 0;
-                            receivedResponse = false;
-                            receivePacket.setLength(blockSize);
-                            byte[] responseMessage = response.toJson().getBytes("UTF-8");
-                            sendPacket = new DatagramPacket(responseMessage, responseMessage.length, host, hostPort.port);
+                        if(HANDSHAKE_REQUEST.equals(request.getString("command"))){
+                            String ServerMessage = new String(receivePacket.getData(), 0, receivePacket.getLength(), "UTF-8");
+                            log.info(ServerMessage);
+                            Document response = Document.parse(ServerMessage);
+                            if (HANDSHAKE_RESPONSE.equals(response.getString("command"))) {
+                                Document newPort = (Document) response.get("hostPort");
+                                HostPort newHost = new HostPort(newPort);
+                                if(!connectSocket.contains(newHost)) {
+                                    connectSocket.add(new HostPort(newPort));
+                                }
+                                dealUdpSync(new HostPort(newPort) ,fileSystemManager.generateSyncEvents());
+                                receivedResponse = true;
+                            }
                         } else {
-                            // no need to make extra communication and exit the loop.
-                            receivedResponse = true;
+                            // do some action
+                            String ServerMessage = new String(receivePacket.getData(), 0, receivePacket.getLength(), "UTF-8");
+                            log.info(ServerMessage);
+                            Document response = fileService.newOperateAndResponseGenerate(Document.parse(ServerMessage), fileSystemManager);
+                            //do some work here.
+                            if (response != null) {
+                                //continue use this DatagramSocket to send message to guarantee the order of packet.
+                                tries = 0;
+                                receivedResponse = false;
+                                receivePacket.setLength(blockSize);
+                                byte[] responseMessage = response.toJson().getBytes("UTF-8");
+                                sendPacket = new DatagramPacket(responseMessage, responseMessage.length, host, hostPort.port);
+                            } else {
+                                // no need to make extra communication and exit the loop.
+                                receivedResponse = true;
+                            }
                         }
                     }
                 } catch (InterruptedIOException e) {
