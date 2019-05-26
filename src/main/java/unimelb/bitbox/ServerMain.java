@@ -68,7 +68,25 @@ public class ServerMain implements FileSystemObserver {
                         if ("udp".equals(mode) && waitingTasks.size() > 0) {
                             int index = 0;
                             for (WaitingTask task : waitingTasks) {
-                                if (udpSendAndResponse(task.getRequest(), task.getHostPort())) {
+                                int tryTimes = task.getRetryTimes();
+                                if (tryTimes < 5) {
+                                    if (udpSendAndResponse(task.getRequest(), task.getHostPort())) {
+                                        waitingTasks.set(index, null);
+                                    } else {
+                                        task.setRetryTimes(tryTimes + 1);
+                                    }
+                                } else {
+                                    if (connectSocket.contains(task.getHostPort())) {
+                                        int i = 0;
+                                        for (HostPort port : connectSocket) {
+                                            if (port.equals(task.getHostPort())) {
+                                                connectSocket.set(i, null);
+                                                break;
+                                            }
+                                            i++;
+                                        }
+                                        connectSocket.removeIf(Objects::isNull);
+                                    }
                                     waitingTasks.set(index, null);
                                 }
                             }
@@ -509,7 +527,7 @@ public class ServerMain implements FileSystemObserver {
 
             //when try 5 times, add to waiting list and deal in sync generate
             if (tries == 5) {
-                waitingTasks.add(new WaitingTask(hostPort, request));
+                waitingTasks.add(new WaitingTask(hostPort, request, 0));
             }
 
             if (receivedResponse) {
