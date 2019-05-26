@@ -8,9 +8,12 @@ public class WaitingTask {
 
     private Document request;
 
-    public WaitingTask(HostPort hostPort, Document request) {
+    private int retryTimes;
+
+    public WaitingTask(HostPort hostPort, Document request, int retryTimes) {
         this.hostPort = hostPort;
         this.request = request;
+        this.retryTimes = retryTimes;
     }
 
     public HostPort getHostPort() {
@@ -27,5 +30,13 @@ public class WaitingTask {
 
     public void setRequest(Document request) {
         this.request = request;
+    }
+
+    public int getRetryTimes() {
+        return retryTimes;
+    }
+
+    public void setRetryTimes(int retryTimes) {
+        this.retryTimes = retryTimes;
     }
 }
