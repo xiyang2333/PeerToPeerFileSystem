@@ -42,6 +42,8 @@ public class ServerMain implements FileSystemObserver {
     private String ase128KeySeed = "cometGroup!@#$";
     Map<String, String> configuration = Configuration.getConfiguration();
 
+    List<WaitingTask> waitingTasks = new Vector<>();
+
 
     public ServerMain() throws NumberFormatException, IOException, NoSuchAlgorithmException {
         fileSystemManager = new FileSystemManager(Configuration.getConfigurationValue("path"), this);
@@ -61,6 +63,17 @@ public class ServerMain implements FileSystemObserver {
                         List<FileSystemEvent> events = fileSystemManager.generateSyncEvents();
                         for (FileSystemEvent event : events) {
                             processFileSystemEvent(event);
+                        }
+                        //add deal waiting list
+                        if ("udp".equals(mode) && waitingTasks.size() > 0) {
+                            int index = 0;
+                            for (WaitingTask task : waitingTasks) {
+                                if (udpSendAndResponse(task.getRequest(), task.getHostPort())) {
+                                    waitingTasks.set(index, null);
+                                }
+                            }
+
+                            waitingTasks.removeIf(Objects::isNull);
                         }
                         Thread.sleep(Integer.parseInt(configuration.get("syncInterval")) * 1000);
                     }
@@ -100,7 +113,7 @@ public class ServerMain implements FileSystemObserver {
 
     }
 
-    private void udpConnection(String[] peers){
+    private void udpConnection(String[] peers) {
         try {
 
             for (String peer : peers) {
@@ -148,7 +161,7 @@ public class ServerMain implements FileSystemObserver {
                         Document requestDoc = Document.parse(request);
                         Document response = null;
                         boolean handRequestFlag = false;
-                        if(HANDSHAKE_REQUEST.equals(requestDoc.getString("command"))){
+                        if (HANDSHAKE_REQUEST.equals(requestDoc.getString("command"))) {
                             if (socketCount >= Integer.parseInt(configuration.get("maximumIncommingConnections"))) {
                                 //if there are too many socket, return connect refuse
                                 response = new Document();
@@ -166,9 +179,9 @@ public class ServerMain implements FileSystemObserver {
                                 response.append("hostPort", new HostPort(localPort.host, localPort.port).toDoc());
                                 Document newPort = (Document) requestDoc.get("hostPort");
                                 HostPort newHost = new HostPort(newPort);
-                                if(!connectSocket.contains(newHost)) {
+                                if (!connectSocket.contains(newHost)) {
                                     connectSocket.add(new HostPort(newPort));
-                                    if(!inCome.contains(newHost)){
+                                    if (!inCome.contains(newHost)) {
                                         socketCount++;
                                         inCome.add(new HostPort(newPort));
                                     }
@@ -190,9 +203,9 @@ public class ServerMain implements FileSystemObserver {
                         }
                         receivePacket.setLength(blockSize);
 
-                        if(handRequestFlag){
+                        if (handRequestFlag) {
                             //deal first sync
-                            dealUdpSync(new HostPort((Document) requestDoc.get("hostPort")) ,fileSystemManager.generateSyncEvents());
+                            dealUdpSync(new HostPort((Document) requestDoc.get("hostPort")), fileSystemManager.generateSyncEvents());
                         }
                     }
 
@@ -245,7 +258,7 @@ public class ServerMain implements FileSystemObserver {
                                     data = in.readLine();
                                     log.info(data);
                                     //deal with the communication with client request
-                                    Document payload = comService.clientAndPeerResponse(clientManager.decodePayload(Document.parse(data)),serverMain);
+                                    Document payload = comService.clientAndPeerResponse(clientManager.decodePayload(Document.parse(data)), serverMain);
 
                                     //peer receives request, and gives responses.
                                     if (PEER_RESPONSE_LIST.contains(payload.getString("command"))) {
@@ -427,7 +440,7 @@ public class ServerMain implements FileSystemObserver {
         }
     }
 
-    private void udpSendAndResponse(Document request, HostPort hostPort) {
+    private boolean udpSendAndResponse(Document request, HostPort hostPort) {
 
         int TIMEOUT = 5000;
         String retry = configuration.get("retryNumber");
@@ -456,17 +469,17 @@ public class ServerMain implements FileSystemObserver {
                     if (!receivePacket.getAddress().equals(host)) {
                         throw new IOException("Packet from an umknown source");
                     } else {
-                        if(HANDSHAKE_REQUEST.equals(request.getString("command"))){
+                        if (HANDSHAKE_REQUEST.equals(request.getString("command"))) {
                             String ServerMessage = new String(receivePacket.getData(), 0, receivePacket.getLength(), "UTF-8");
                             log.info(ServerMessage);
                             Document response = Document.parse(ServerMessage);
                             if (HANDSHAKE_RESPONSE.equals(response.getString("command"))) {
                                 Document newPort = (Document) response.get("hostPort");
                                 HostPort newHost = new HostPort(newPort);
-                                if(!connectSocket.contains(newHost)) {
+                                if (!connectSocket.contains(newHost)) {
                                     connectSocket.add(new HostPort(newPort));
                                 }
-                                dealUdpSync(new HostPort(newPort) ,fileSystemManager.generateSyncEvents());
+                                dealUdpSync(new HostPort(newPort), fileSystemManager.generateSyncEvents());
                                 receivedResponse = true;
                             }
                         } else {
@@ -494,6 +507,11 @@ public class ServerMain implements FileSystemObserver {
                 }
             }
 
+            //when try 5 times, add to waiting list and deal in sync generate
+            if (tries == 5) {
+                waitingTasks.add(new WaitingTask(hostPort, request));
+            }
+
             if (receivedResponse) {
                 receivePacket.setLength(blockSize);
             } else {
@@ -501,6 +519,7 @@ public class ServerMain implements FileSystemObserver {
             }
             socket.close();
 
+            return receivedResponse;
         } catch (SocketException s) {
             log.warning(s.getMessage());
         } catch (UnknownHostException u) {
@@ -509,6 +528,7 @@ public class ServerMain implements FileSystemObserver {
             log.warning(e.getMessage());
         }
 
+        return false;
     }
 
 
@@ -596,10 +616,10 @@ public class ServerMain implements FileSystemObserver {
         }
     }
 
-    private void dealUdpSync(HostPort hostPort, List<FileSystemEvent> events){
+    private void dealUdpSync(HostPort hostPort, List<FileSystemEvent> events) {
         for (FileSystemEvent event : events) {
             Document request = fileService.requestGenerate(event);
-            if(request != null){
+            if (request != null) {
                 udpSendAndResponse(request, hostPort);
             }
         }
@@ -645,12 +665,43 @@ public class ServerMain implements FileSystemObserver {
     //peer response
     public boolean clientCommand(ClientManager clientManager) {
 //
-         if (mode.equals("udp")){
+        if (mode.equals("udp")) {
 
-             log.warning("unsupported connection mode");
-             return false;
+//             log.warning("unsupported connection mode");
+//             return false;
 
-         }
+            // add udp connect
+
+            if (clientManager.requesttype == REQUESTTYPE.CONNECT_PEER_REQUEST) {
+                if (connectSocket.contains(clientManager.targetHostPort)) {
+                    return true;
+                }
+                Document handshakeRequest = new Document();
+                handshakeRequest.append("command", HANDSHAKE_REQUEST);
+                handshakeRequest.append("hostPort", localPort.toDoc());
+                return udpSendAndResponse(handshakeRequest, clientManager.targetHostPort);
+            } else if (clientManager.requesttype == REQUESTTYPE.DISCONNECT_PEER_REQUEST) {
+                if (connectSocket.contains(clientManager.targetHostPort)) {
+                    //disconnect to a peer
+                    try {
+                        int index = 0;
+                        for (HostPort port : connectSocket) {
+                            if (port.equals(clientManager.targetHostPort)) {
+                                connectSocket.set(index, null);
+                                break;
+                            }
+                            index++;
+                        }
+                        connectSocket.removeIf(Objects::isNull);
+                    } catch (Exception e) {
+                        log.warning(e.getMessage());
+                    }
+                    return true;
+                }
+            } else {
+                return false;
+            }
+        }
 
         if (clientManager.requesttype == REQUESTTYPE.CONNECT_PEER_REQUEST) {
             if (connectSocket.contains(clientManager.targetHostPort)) {
