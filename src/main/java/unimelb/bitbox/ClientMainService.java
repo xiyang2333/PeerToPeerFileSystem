@@ -72,7 +72,11 @@ public class ClientMainService {
             Socket socket = new Socket(hostPort.host, hostPort.port);
             Document authRequest = new Document();
             authRequest.append("command", AUTH_REQUEST);
-            authRequest.append("identity", publicKeyName);
+            String identity = publicKeyName;
+            if(argsBean.getIdentity() != null && !"".equals(argsBean.getIdentity())){
+                identity = argsBean.getIdentity();
+            }
+            authRequest.append("identity", identity);
             //send
             String requestJson = authRequest.toJson();
             log.info(requestJson);
