@@ -14,9 +14,12 @@ public class CmdLineArgs {
 
 	@Option(required = true, name = "-s", usage = "Server")
 	private String server;
-	
+
 	@Option(required = false, name = "-p", usage = "Peer")
 	private String peer;
+
+	@Option(required = false, name = "-i", usage = "Identity")
+	private String identity;
 
 	public String getServer() {
 		return server;
@@ -30,4 +33,7 @@ public class CmdLineArgs {
 		return command;
 	}
 
+	public String getIdentity() {
+		return identity;
+	}
 }

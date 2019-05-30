@@ -184,6 +184,7 @@ public class ServerMain implements FileSystemObserver {
                                 //if there are too many socket, return connect refuse
                                 response = new Document();
                                 response.append("command", CONNECTION_REFUSED);
+                                response.append("message", "connection limit reached");
                                 //get connect host port info
                                 ArrayList<Document> peers = new ArrayList<>();
                                 for (HostPort port : ServerMain.connectSocket) {
@@ -331,6 +332,7 @@ public class ServerMain implements FileSystemObserver {
                                     //if there are too many socket, return connect refuse
                                     Document connectionRefused = new Document();
                                     connectionRefused.append("command", CONNECTION_REFUSED);
+                                    connectionRefused.append("message", "connection limit reached");
                                     //get connect host port info
                                     ArrayList<Document> peers = new ArrayList<>();
                                     for (HostPort port : ServerMain.connectSocket) {
@@ -479,7 +481,11 @@ public class ServerMain implements FileSystemObserver {
             int tries = 0;
             boolean receivedResponse = false;
             while (!receivedResponse && tries < MAXNUM) {
-                socket.send(sendPacket);
+                if (! HANDSHAKE_REQUEST.equals(request.getString("command")) || !refusedSocket.contains(hostPort)) {
+                    socket.send(sendPacket);
+                } else {
+                    return false;
+                }
 
                 try {
                     socket.receive(receivePacket);
@@ -499,6 +505,14 @@ public class ServerMain implements FileSystemObserver {
                                 }
                                 dealUdpSync(new HostPort(newPort), fileSystemManager.generateSyncEvents());
                                 receivedResponse = true;
+                            } else if (CONNECTION_REFUSED.equals(response.getString("command"))) {
+                                receivedResponse = true;
+                                refusedSocket.add(hostPort);
+                                List<Document> portDoc = (ArrayList<Document>) response.get("peers");
+                                for (Document nextHost : portDoc) {
+                                    HostPort port = new HostPort(nextHost);
+                                    udpSendAndResponse(request, port);
+                                }
                             }
                         } else {
                             // do some action
