@@ -16,6 +16,7 @@ import java.util.logging.Logger;
 public class RsaUtilImpl implements RsaUtil{
 
     private static String ALGORITHM = "RSA";
+    private static String AL_PADDING = "RSA/ECB/PKCS1Padding";
 
     private static Logger log = Logger.getLogger(SocketReceiveDealThread.class.getName());
 
@@ -26,7 +27,7 @@ public class RsaUtilImpl implements RsaUtil{
 
         try {
 
-            Cipher cipher = Cipher.getInstance(ALGORITHM);
+            Cipher cipher = Cipher.getInstance(AL_PADDING);
             cipher.init(Cipher.ENCRYPT_MODE, getPublicKey(publicKey));
             byte[] plaintextBytes = plainText.getBytes("UTF-8");
             cipherText = Base64.getEncoder().encodeToString(cipher.doFinal(plaintextBytes));
@@ -68,7 +69,7 @@ public class RsaUtilImpl implements RsaUtil{
         byte[] dectyptedText = null;
         try {
 
-            Cipher cipher = Cipher.getInstance(ALGORITHM);
+            Cipher cipher = Cipher.getInstance(AL_PADDING);
             cipher.init(Cipher.DECRYPT_MODE, getPrivateKey(initPrivateKey(privateKeyFile)));
             byte[] text = Base64.getDecoder().decode(cipherText);
             dectyptedText = cipher.doFinal(text);
