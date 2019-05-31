@@ -208,6 +208,8 @@ public class ServerMain implements FileSystemObserver {
                                 handRequestFlag = true;
                             }
                         } else {
+                            System.out.println(receivePacket.getAddress().toString());
+                            System.out.println(receivePacket.getPort());
                             response = fileService.newOperateAndResponseGenerate(requestDoc, fileSystemManager);
                         }
 
@@ -542,6 +544,17 @@ public class ServerMain implements FileSystemObserver {
             //when try 5 times, add to waiting list and deal in sync generate
             if (tries == 5) {
                 waitingTasks.add(new WaitingTask(hostPort, request, 0));
+                if (connectSocket.contains(hostPort)) {
+                    int i = 0;
+                    for (HostPort port : connectSocket) {
+                        if (port.equals(hostPort)) {
+                            connectSocket.set(i, null);
+                            break;
+                        }
+                        i++;
+                    }
+                    connectSocket.removeIf(Objects::isNull);
+                }
             }
 
             if (receivedResponse) {

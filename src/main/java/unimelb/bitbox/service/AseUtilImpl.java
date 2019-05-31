@@ -13,12 +13,13 @@ import java.util.logging.Logger;
 public class AseUtilImpl implements AseUtil{
 
     private static Logger log = Logger.getLogger(SocketReceiveDealThread.class.getName());
+    private static String AL = "AES/ECB/PKCS5Padding";
 
     @Override
     public String encrypt(String plainText, Key secretKey) {
 
         try {
-            Cipher cipher = Cipher.getInstance("AES");
+            Cipher cipher = Cipher.getInstance(AL);
             cipher.init(Cipher.ENCRYPT_MODE, secretKey);
             byte[] p = plainText.getBytes("UTF-8");
             String encoded = Base64.getEncoder().encodeToString(cipher.doFinal(p));
@@ -32,7 +33,7 @@ public class AseUtilImpl implements AseUtil{
     @Override
     public String decrypt(String cipherText, Key secretKey) {
         try {
-            Cipher cipher = Cipher.getInstance("AES");
+            Cipher cipher = Cipher.getInstance(AL);
             cipher.init(Cipher.DECRYPT_MODE, secretKey);
             byte[] c = Base64.getDecoder().decode(cipherText);
             byte[] result = cipher.doFinal(c);
